@@ -22,14 +22,18 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN if getent group "$AGENT_GID" > /dev/null; then \
+      EXISTING_GROUP="$(getent group "$AGENT_GID" | cut -d: -f1)"; \
+      usermod -u "$AGENT_UID" -g "$EXISTING_GROUP" -d /home/agent -m -l agent node; \
+    else \
+      groupmod -g "$AGENT_GID" node && \
+      usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \
+    fi
+
+# Install Codex CLI (run as root before USER agent)
+RUN npm install -g @openai/codex
+
 USER ${AGENT_UID}:${AGENT_GID}
-
-# Install Claude Code CLI
-RUN curl -fsSL https://claude.ai/install.sh | bash
-
-# Add Claude to PATH
-ENV PATH="/home/agent/.local/bin:$PATH"
 
 WORKDIR /home/agent
 

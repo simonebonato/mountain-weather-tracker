@@ -61,13 +61,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   const plan = await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: docker({ containerUid: 1000, mounts: [{ hostPath: "~/.codex", sandboxPath: "~/.codex" }] }),
     name: "planner",
     // One iteration is enough: the planner just needs to read and reason,
     // not write code.
     maxIterations: 1,
     // Opus for planning: dependency analysis benefits from deeper reasoning.
-    agent: sandcastle.claudeCode("claude-opus-4-6"),
+    agent: sandcastle.codex("gpt-5.4-mini"),
     promptFile: "./.sandcastle/plan-prompt.md",
   });
 
@@ -111,7 +111,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     issues.map(async (issue) => {
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
-        sandbox: docker(),
+        sandbox: docker({ containerUid: 1000, mounts: [{ hostPath: "~/.codex", sandboxPath: "~/.codex" }] }),
         hooks,
         copyToWorktree,
       });
@@ -121,7 +121,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         const implement = await sandbox.run({
           name: "implementer",
           maxIterations: 100,
-          agent: sandcastle.claudeCode("claude-opus-4-6"),
+          agent: sandcastle.codex("gpt-5.4-mini"),
           promptFile: "./.sandcastle/implement-prompt.md",
           promptArgs: {
             TASK_ID: issue.id,
@@ -135,7 +135,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
-            agent: sandcastle.claudeCode("claude-opus-4-6"),
+            agent: sandcastle.codex("gpt-5.4-mini"),
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
@@ -203,10 +203,10 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: docker({ containerUid: 1000, mounts: [{ hostPath: "~/.codex", sandboxPath: "~/.codex" }] }),
     name: "merger",
     maxIterations: 1,
-    agent: sandcastle.claudeCode("claude-opus-4-6"),
+    agent: sandcastle.codex("gpt-5.4-mini"),
     promptFile: "./.sandcastle/merge-prompt.md",
     promptArgs: {
       // A markdown list of branch names, one per line.
