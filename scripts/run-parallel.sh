@@ -16,6 +16,8 @@ Options:
   --tasks <file>       Read tasks from a file (one per line, # = comment)
   --concurrency <n>    Max agents running at the same time (default: 3)
   --agent <name>       Agent to use in worktree mode: codex (default) or claude
+  --model <model>      Claude model to use (default: claude-sonnet-4-6)
+  --effort <level>     Thinking effort: low, medium, high, xhigh, max (default: low)
   -h, --help           Show this help
 
 Examples:
@@ -23,6 +25,7 @@ Examples:
   $(basename "$0") --from-issues --label sandcastle --concurrency 2
   $(basename "$0") --tasks tasks.md --concurrency 5
   $(basename "$0") --from-issues --agent claude --concurrency 1
+  $(basename "$0") --from-issues --agent claude --model claude-haiku-4-5-20251001 --effort low
 EOF
   exit 1
 }
@@ -32,6 +35,8 @@ LABEL="parallel"
 TASKS_FILE=""
 CONCURRENCY=3
 AGENT="codex"
+MODEL="claude-sonnet-4-6"
+EFFORT="low"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,6 +45,8 @@ while [[ $# -gt 0 ]]; do
     --tasks) TASKS_FILE="$2"; shift 2 ;;
     --concurrency) CONCURRENCY="$2"; shift 2 ;;
     --agent) AGENT="$2"; shift 2 ;;
+    --model) MODEL="$2"; shift 2 ;;
+    --effort) EFFORT="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) echo "Unknown flag: $1"; usage ;;
   esac
@@ -89,7 +96,7 @@ echo ""
 
 # --- Detect execution mode ---
 use_sandcastle=false
-if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+if [[ "$AGENT" == "codex" ]] && command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
   if [[ -f ".sandcastle/run.ts" && -f ".sandcastle/package.json" ]]; then
     use_sandcastle=true
   else
@@ -153,7 +160,7 @@ for task in "${TASKS[@]}"; do
   (
     cd "$worktree_path"
     if [[ "$AGENT" == "claude" ]]; then
-      claude "$task"
+      claude --dangerously-skip-permissions --model "$MODEL" --effort "$EFFORT" "$task. Commit your changes with git before finishing."
     else
       # shellcheck disable=SC2086
       codex $CODEX_AFK_FLAGS "$task"
