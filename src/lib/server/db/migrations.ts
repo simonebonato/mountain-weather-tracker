@@ -10,6 +10,10 @@ const migrations = [
   {
     id: '0001_initial',
     path: resolve(process.cwd(), 'drizzle/0001_initial.sql')
+  },
+  {
+    id: '0002_source_reliability',
+    path: resolve(process.cwd(), 'drizzle/0002_source_reliability.sql')
   }
 ] as const;
 

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS sources (
   adapter TEXT NOT NULL,
   geographic_match_score REAL NOT NULL DEFAULT 1,
   domain_specialty_score REAL NOT NULL DEFAULT 1,
+  reliability_score REAL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

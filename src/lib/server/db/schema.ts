@@ -63,6 +63,7 @@ export const sources = sqliteTable('sources', {
   adapter: text('adapter').notNull(),
   geographicMatchScore: real('geographic_match_score').notNull().default(1),
   domainSpecialtyScore: real('domain_specialty_score').notNull().default(1),
+  reliabilityScore: real('reliability_score'),
   createdAt: text('created_at')
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`)

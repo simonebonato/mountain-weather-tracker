@@ -145,6 +145,7 @@
       <h1 id="area-ingestion-heading">Comparison View</h1>
       <p>
         {data.areas.length} tracked {data.areas.length === 1 ? 'area' : 'areas'}
+        · <a href="/settings" class="settings-link">Source settings</a>
       </p>
     </div>
 
@@ -412,6 +413,11 @@
     margin-top: 6px;
     color: #667365;
     font-size: 0.95rem;
+  }
+
+  .settings-link {
+    color: #245a46;
+    font-weight: 700;
   }
 
   .url-form {
