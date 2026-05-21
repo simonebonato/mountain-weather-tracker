@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -216,3 +216,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.sandcastle/.env
+.sandcastle/node_modules
+
+# Node / SvelteKit
+node_modules/
+.svelte-kit/
+build/
+dist/
+coverage/
+npm-debug.log*
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Local app data
+data/*.sqlite
+data/*.sqlite-*
+
+# The Python template ignores all lib/ directories; keep SvelteKit source visible.
+!src/lib/
