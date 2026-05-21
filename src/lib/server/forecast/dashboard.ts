@@ -90,6 +90,14 @@ function buildDashboardOuting(
     .where(eq(keyPoints.areaId, outing.areaId))
     .all();
   const forecastSources = db.select().from(sources).all();
+  const sourceWeights = new Map(
+    forecastSources.map((s) => [
+      s.id,
+      s.geographicMatchScore *
+        s.domainSpecialtyScore *
+        (s.reliabilityScore !== null ? s.reliabilityScore / 5 : 1)
+    ])
+  );
   const forecastsForOuting: DashboardForecast[] = [];
   let missingForecast = false;
 
@@ -119,7 +127,10 @@ function buildDashboardOuting(
   const hasStaleForecast = forecastsForOuting.some(
     (forecast) => !forecast.fresh
   );
-  const payloads = forecastsForOuting.map((forecast) => forecast.payload);
+  const weightedPayloads = forecastsForOuting.map((f) => ({
+    payload: f.payload,
+    weight: sourceWeights.get(f.sourceId) ?? 1
+  }));
 
   return {
     id: outing.id,
@@ -128,8 +139,8 @@ function buildDashboardOuting(
     dateRangeLabel: formatDateRange(outing.startDate, outing.endDate),
     lastUpdatedAt: lastUpdatedAt?.toISOString() ?? null,
     needsRefresh: missingForecast || hasStaleForecast,
-    verdict: computeVerdict(payloads),
-    keyNumbers: computeKeyNumbers(payloads),
+    verdict: computeVerdict(weightedPayloads),
+    keyNumbers: computeKeyNumbers(weightedPayloads),
     forecasts: forecastsForOuting.sort((a, b) =>
       a.forecastDate.localeCompare(b.forecastDate)
     )
@@ -147,10 +158,12 @@ function latestFetchTime(forecastsForOuting: DashboardForecast[]): Date | null {
   return new Date(Math.max(...timestamps));
 }
 
+type WeightedPayload = { payload: ForecastPayload; weight: number };
+
 function computeKeyNumbers(
-  payloads: ForecastPayload[]
+  weighted: WeightedPayload[]
 ): DashboardOuting['keyNumbers'] {
-  if (payloads.length === 0) {
+  if (weighted.length === 0) {
     return {
       temperatureC: null,
       precipitationMm: null,
@@ -159,24 +172,20 @@ function computeKeyNumbers(
   }
 
   return {
-    temperatureC: average(payloads.map((payload) => payload.temperatureC)),
-    precipitationMm: average(
-      payloads.map((payload) => payload.precipitationMm)
-    ),
-    windSpeedKmh: average(payloads.map((payload) => payload.windSpeedKmh))
+    temperatureC: weightedAverage(weighted, (p) => p.temperatureC),
+    precipitationMm: weightedAverage(weighted, (p) => p.precipitationMm),
+    windSpeedKmh: weightedAverage(weighted, (p) => p.windSpeedKmh)
   };
 }
 
-function computeVerdict(payloads: ForecastPayload[]): Verdict {
-  if (payloads.length === 0) {
+function computeVerdict(weighted: WeightedPayload[]): Verdict {
+  if (weighted.length === 0) {
     return 'Uncertain';
   }
 
-  const precipitation = average(
-    payloads.map((payload) => payload.precipitationMm)
-  );
-  const wind = average(payloads.map((payload) => payload.windSpeedKmh));
-  const visibility = average(payloads.map((payload) => payload.visibilityM));
+  const precipitation = weightedAverage(weighted, (p) => p.precipitationMm);
+  const wind = weightedAverage(weighted, (p) => p.windSpeedKmh);
+  const visibility = weightedAverage(weighted, (p) => p.visibilityM);
 
   if (precipitation >= 8 || wind >= 55 || visibility < 5000) {
     return 'Bad';
@@ -189,12 +198,19 @@ function computeVerdict(payloads: ForecastPayload[]): Verdict {
   return 'Good';
 }
 
-function average(values: number[]): number {
-  return (
-    Math.round(
-      (values.reduce((sum, value) => sum + value, 0) / values.length) * 10
-    ) / 10
+function weightedAverage(
+  weighted: WeightedPayload[],
+  getValue: (p: ForecastPayload) => number
+): number {
+  const totalWeight = weighted.reduce((sum, { weight }) => sum + weight, 0);
+  if (totalWeight === 0) {
+    return 0;
+  }
+  const sum = weighted.reduce(
+    (acc, { payload, weight }) => acc + getValue(payload) * weight,
+    0
   );
+  return Math.round((sum / totalWeight) * 10) / 10;
 }
 
 function formatDateRange(startDate: string, endDate: string): string {
