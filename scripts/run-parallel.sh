@@ -187,6 +187,20 @@ parse_task_blocks() {
 
     if [[ $current_index -lt 0 ]]; then
       [[ -z "$(trim "$line")" || "$line" == \#* ]] && continue
+      if $ADAPT_ISSUES; then
+        TASK_HEADINGS+=("(no heading)")
+        TASK_SUMMARIES+=("$MISSING_FIELD")
+        TASK_FILES+=("$MISSING_FIELD")
+        TASK_FORBIDDEN+=("$MISSING_FIELD")
+        TASK_CHECKS+=("$MISSING_FIELD")
+        TASK_DONE+=("$MISSING_FIELD")
+        TASK_DETAILS+=("")
+        TASK_ISSUES+=("$current_issue")
+        current_index=$((${#TASK_HEADINGS[@]} - 1))
+        current_field="DETAILS"
+        append_task_field "$current_index" "DETAILS" "$line"
+        continue
+      fi
       echo "error: content found before first '## Task:' heading: $line" >&2
       return 1
     fi
@@ -271,16 +285,17 @@ validate_task() {
 }
 
 validate_task_blocks() {
-  local errors=0 i task_errors
+  local errors=0 i task_errors quiet=false
+  [[ "${1:-}" == "--quiet" ]] && quiet=true
 
   if [[ $(task_count) -eq 0 ]]; then
-    echo "error: no structured task blocks found. Start each task with '## Task:'." >&2
+    $quiet || echo "error: no structured task blocks found. Start each task with '## Task:'." >&2
     return 1
   fi
 
   for i in "${!TASK_HEADINGS[@]}"; do
     if ! task_errors=$(validate_task "$i"); then
-      printf '%s\n' "$task_errors" >&2
+      $quiet || printf '%s\n' "$task_errors" >&2
       errors=$((errors + 1))
     fi
   done
@@ -292,7 +307,14 @@ call_claude_for_adaptation() {
   local i="$1"
   local validation_errors="$2"
   local current_body prompt
-  current_body=$(format_task_block "$i")
+  # For synthetic tasks (all required fields are MISSING_FIELD, prose captured in DETAILS),
+  # show Codex the raw original body instead of a sentinel-riddled format_task_block.
+  local details_val="${TASK_DETAILS[$i]:-}"
+  if [[ "${TASK_SUMMARIES[$i]:-}" == "$MISSING_FIELD" && -n "$(trim "$details_val")" ]]; then
+    current_body="$details_val"
+  else
+    current_body=$(format_task_block "$i")
+  fi
   prompt="The following GitHub issue body does not conform to the required parallel runner task format.
 
 Validation errors:
@@ -318,7 +340,11 @@ Rules:
 - One task per issue.
 
 Output ONLY the reformatted task block, nothing else."
-  claude --dangerously-skip-permissions --model "$MODEL" --effort "$EFFORT" "$prompt" 2>/dev/null
+  # codex in interactive mode writes its response to the tty, not stdout.
+  # Command substitution captures stdout only, so adapted_body is always empty
+  # when using interactive mode. codex exec writes the response to stdout,
+  # making it safe to capture with $().
+  printf '%s' "$prompt" | codex exec --dangerously-bypass-approvals-and-sandbox 2>/dev/null
 }
 
 adapt_invalid_issues() {
@@ -676,7 +702,7 @@ else
   parse_task_blocks "$TASKS_FILE"
 fi
 
-if ! validate_task_blocks; then
+if ! validate_task_blocks $($ADAPT_ISSUES && echo --quiet); then
   if $ADAPT_ISSUES; then
     adapt_invalid_issues || exit 1
     validate_task_blocks
