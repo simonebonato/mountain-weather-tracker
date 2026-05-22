@@ -59,3 +59,9 @@ A weather data provider. Each Source carries a composite weight used when comput
 3. **User reliability score** (optional) — a manual 1–5 trust override the user can set per Source; multiplied in when provided
 
 Final weight = geographic match × domain specialty × (reliability if set, else 1).
+
+Sources that lack a structured API carry **fetch instructions** — free-text guidance (URL + navigation notes) used by the agent adapter to locate and extract forecast data. Sources without fetch instructions use a hardcoded API adapter (e.g. Open-Meteo).
+
+## Discovery
+
+The user-triggered process of finding new Sources through web exploration. Initiated from the settings UI when coverage for a region feels lacking. The agent explores the web, proposes new Source records with initial geographic match and domain specialty scores, and persists them for user review. Discovered Sources participate in forecast aggregation immediately; the user can adjust scores or set a reliability score afterward.
