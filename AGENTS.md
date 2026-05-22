@@ -26,6 +26,28 @@ Label: parallel
 - [Add only factual project-specific notes here.]
 - Agent skill metadata for this dotfiles repo is recorded in `docs/agents/skill-metadata.md`.
 
+## Creating parallel issues
+
+Issues labeled `parallel` must use the task block format below. The runner will reject any issue body that contains prose before the first `## Task:` heading.
+
+```
+## Task: <short imperative heading>
+
+TASK: <one-sentence summary of what to implement>
+FILES: <comma-separated exact file paths the agent may edit>
+DO NOT TOUCH: <comma-separated exact file paths, or 'none'>
+CHECK: <single literal runnable command>
+DONE WHEN:
+- <acceptance criterion>
+- <acceptance criterion>
+```
+
+Rules:
+- Every field is required. Omitting any field causes the runner to reject the issue.
+- `FILES` and `DO NOT TOUCH` must be exact paths — no globs.
+- `CHECK` must be a literal runnable command (e.g. `just test`), not prose (e.g. "run the tests").
+- One task per issue. Multiple independent tasks get separate issues.
+
 ## Parallel task contract
 
 When working from `tasks.md`, only accept tasks that contain all required fields:

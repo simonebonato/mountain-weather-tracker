@@ -13,3 +13,15 @@ Mode: github-issues — Label: `parallel`
 # 2. Kick off parallel agents
 ./scripts/run-parallel.sh --from-issues --label parallel
 ```
+
+## Parallel agents
+
+Mode: github-issues — Label: `parallel`
+
+```bash
+# 1. Ask your agent to use the prepare-for-sandcastle prompt.
+#    It will print gh issue create commands — run them.
+
+# 2. Kick off parallel agents
+./scripts/run-parallel.sh --from-issues --label parallel
+```

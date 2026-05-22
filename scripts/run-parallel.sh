@@ -41,11 +41,12 @@ LABEL="parallel"
 TASKS_FILE=""
 CONCURRENCY=1
 AGENT="codex"
-MODEL="claude-sonnet-4-6"
+MODEL="gpt-5.3-codex"
 EFFORT="normal"
 VALIDATE_ONLY=false
 NO_REVIEW=false
 COMMENT_STATUS=true
+ADAPT_ISSUES=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,6 +60,7 @@ while [[ $# -gt 0 ]]; do
     --agent) AGENT="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     --effort) EFFORT="$2"; shift 2 ;;
+    --adapt-issues) ADAPT_ISSUES=true; shift ;;
     -h|--help) usage ;;
     *) echo "Unknown flag: $1"; usage ;;
   esac
@@ -66,6 +68,11 @@ done
 
 if ! $FROM_ISSUES && [[ -z "$TASKS_FILE" ]]; then
   usage
+fi
+
+if $ADAPT_ISSUES && ! $FROM_ISSUES; then
+  echo "error: --adapt-issues requires --from-issues" >&2
+  exit 1
 fi
 
 # --- Resolve task list ---
@@ -124,6 +131,32 @@ append_task_field() {
   else
     set_task_field "$index" "$field" "$value"
   fi
+}
+
+reparse_task_body() {
+  local i="$1"
+  local body="$2"
+  local body_file line current_field=""
+  body_file=$(mktemp)
+  printf '%s\n' "$body" > "$body_file"
+
+  TASK_SUMMARIES[$i]="$MISSING_FIELD"
+  TASK_FILES[$i]="$MISSING_FIELD"
+  TASK_FORBIDDEN[$i]="$MISSING_FIELD"
+  TASK_CHECKS[$i]="$MISSING_FIELD"
+  TASK_DONE[$i]="$MISSING_FIELD"
+  TASK_DETAILS[$i]=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^##[[:space:]]+Task: ]] && { current_field=""; continue; }
+    if [[ "$line" =~ ^(TASK|FILES|DO[[:space:]]+NOT[[:space:]]+TOUCH|CHECK|DONE[[:space:]]+WHEN|DETAILS):[[:space:]]*(.*)$ ]]; then
+      current_field="${BASH_REMATCH[1]}"
+      set_task_field "$i" "$current_field" "${BASH_REMATCH[2]}"
+      continue
+    fi
+    [[ -n "$current_field" ]] && append_task_field "$i" "$current_field" "$line"
+  done < "$body_file"
+  rm -f "$body_file"
 }
 
 parse_task_blocks() {
@@ -188,9 +221,57 @@ contains_glob_pattern() {
   [[ "$value" == *"*"* || "$value" == *"?"* || "$value" == *"["* || "$value" == *"]"* ]]
 }
 
+validate_task() {
+  # Prints error lines for task i to stdout. Returns 1 if any errors found.
+  local i="$1"
+  local heading="${TASK_HEADINGS[$i]}"
+  local errors=0 required value field
+
+  if [[ -z "$(trim "$heading")" ]]; then
+    echo "Task $((i + 1)): empty task heading"
+    errors=$((errors + 1))
+  fi
+
+  for required in TASK FILES "DO NOT TOUCH" CHECK "DONE WHEN"; do
+    case "$required" in
+      TASK)           value="${TASK_SUMMARIES[$i]:-}" ;;
+      FILES)          value="${TASK_FILES[$i]:-}" ;;
+      "DO NOT TOUCH") value="${TASK_FORBIDDEN[$i]:-}" ;;
+      CHECK)          value="${TASK_CHECKS[$i]:-}" ;;
+      "DONE WHEN")    value="${TASK_DONE[$i]:-}" ;;
+    esac
+    field="$(trim "$value")"
+    if [[ "$value" == "$MISSING_FIELD" ]]; then
+      echo "Task $((i + 1)) ($heading): missing required field $required"
+      errors=$((errors + 1))
+    elif [[ -z "$field" ]]; then
+      echo "Task $((i + 1)) ($heading): empty required field $required"
+      errors=$((errors + 1))
+    fi
+  done
+
+  if [[ "${TASK_CHECKS[$i]:-}" != "$MISSING_FIELD" && -n "$(trim "${TASK_CHECKS[$i]:-}")" ]] \
+      && ! is_literal_command "${TASK_CHECKS[$i]}"; then
+    echo "Task $((i + 1)) ($heading): CHECK must be a literal runnable command"
+    errors=$((errors + 1))
+  fi
+
+  if contains_glob_pattern "${TASK_FILES[$i]:-}"; then
+    echo "Task $((i + 1)) ($heading): FILES must use exact paths; glob support is future work"
+    errors=$((errors + 1))
+  fi
+
+  if [[ "$(trim "${TASK_FORBIDDEN[$i]:-}")" != "none" ]] \
+      && contains_glob_pattern "${TASK_FORBIDDEN[$i]:-}"; then
+    echo "Task $((i + 1)) ($heading): DO NOT TOUCH must use exact paths; glob support is future work"
+    errors=$((errors + 1))
+  fi
+
+  [[ $errors -eq 0 ]]
+}
+
 validate_task_blocks() {
-  local errors=0
-  local required field value heading
+  local errors=0 i task_errors
 
   if [[ $(task_count) -eq 0 ]]; then
     echo "error: no structured task blocks found. Start each task with '## Task:'." >&2
@@ -198,47 +279,86 @@ validate_task_blocks() {
   fi
 
   for i in "${!TASK_HEADINGS[@]}"; do
-    heading="${TASK_HEADINGS[$i]}"
-    if [[ -z "$(trim "$heading")" ]]; then
-      echo "Task $((i + 1)): empty task heading" >&2
-      errors=$((errors + 1))
-    fi
-
-    for required in TASK FILES "DO NOT TOUCH" CHECK "DONE WHEN"; do
-      case "$required" in
-        TASK) value="${TASK_SUMMARIES[$i]:-}" ;;
-        FILES) value="${TASK_FILES[$i]:-}" ;;
-        "DO NOT TOUCH") value="${TASK_FORBIDDEN[$i]:-}" ;;
-        CHECK) value="${TASK_CHECKS[$i]:-}" ;;
-        "DONE WHEN") value="${TASK_DONE[$i]:-}" ;;
-      esac
-      field="$(trim "$value")"
-      if [[ "$value" == "$MISSING_FIELD" ]]; then
-        echo "Task $((i + 1)) ($heading): missing required field $required" >&2
-        errors=$((errors + 1))
-      elif [[ -z "$field" ]]; then
-        echo "Task $((i + 1)) ($heading): empty required field $required" >&2
-        errors=$((errors + 1))
-      fi
-    done
-
-    if [[ "${TASK_CHECKS[$i]:-}" != "$MISSING_FIELD" && -n "$(trim "${TASK_CHECKS[$i]:-}")" ]] && ! is_literal_command "${TASK_CHECKS[$i]}"; then
-      echo "Task $((i + 1)) ($heading): CHECK must be a literal runnable command" >&2
-      errors=$((errors + 1))
-    fi
-
-    if contains_glob_pattern "${TASK_FILES[$i]:-}"; then
-      echo "Task $((i + 1)) ($heading): FILES must use exact paths; glob support is future work" >&2
-      errors=$((errors + 1))
-    fi
-
-    if [[ "$(trim "${TASK_FORBIDDEN[$i]:-}")" != "none" ]] && contains_glob_pattern "${TASK_FORBIDDEN[$i]:-}"; then
-      echo "Task $((i + 1)) ($heading): DO NOT TOUCH must use exact paths; glob support is future work" >&2
+    if ! task_errors=$(validate_task "$i"); then
+      printf '%s\n' "$task_errors" >&2
       errors=$((errors + 1))
     fi
   done
 
   [[ $errors -eq 0 ]]
+}
+
+call_claude_for_adaptation() {
+  local i="$1"
+  local validation_errors="$2"
+  local current_body prompt
+  current_body=$(format_task_block "$i")
+  prompt="The following GitHub issue body does not conform to the required parallel runner task format.
+
+Validation errors:
+${validation_errors}
+
+Current issue body:
+${current_body}
+
+Required format:
+## Task: <short imperative heading>
+
+TASK: <one-sentence summary>
+FILES: <comma-separated exact file paths>
+DO NOT TOUCH: <comma-separated exact file paths, or 'none'>
+CHECK: <single literal runnable command>
+DONE WHEN:
+- <acceptance criterion>
+
+Rules:
+- Every field is required.
+- FILES and DO NOT TOUCH must be exact paths, no globs.
+- CHECK must be a literal runnable command, not prose.
+- One task per issue.
+
+Output ONLY the reformatted task block, nothing else."
+  claude --dangerously-skip-permissions --model "$MODEL" --effort "$EFFORT" "$prompt" 2>/dev/null
+}
+
+adapt_invalid_issues() {
+  local i task_errors issue heading answer adapted_body
+  for i in "${!TASK_HEADINGS[@]}"; do
+    if ! task_errors=$(validate_task "$i"); then
+      issue="${TASK_ISSUES[$i]:-}"
+      heading="${TASK_HEADINGS[$i]}"
+
+      while true; do
+        printf '%s\n' "$task_errors" >&2
+        printf 'Adapt issue #%s ("%s")? [y/N] ' "$issue" "$heading"
+        read -r answer
+        if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+          echo "Aborted." >&2
+          return 1
+        fi
+
+        adapted_body=$(call_claude_for_adaptation "$i" "$task_errors")
+        printf '\n--- Reformatted task block ---\n%s\n--- End ---\n\n' "$adapted_body"
+
+        printf 'Use this reformatted block? [y/N] '
+        read -r answer
+        if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+          continue
+        fi
+
+        gh issue edit "$issue" --body "$adapted_body"
+        reparse_task_body "$i" "$adapted_body"
+
+        if ! task_errors=$(validate_task "$i"); then
+          continue
+        fi
+
+        printf 'Run issue #%s now? [y/N] ' "$issue"
+        read -r answer
+        break
+      done
+    fi
+  done
 }
 
 format_task_block() {
@@ -556,7 +676,14 @@ else
   parse_task_blocks "$TASKS_FILE"
 fi
 
-validate_task_blocks
+if ! validate_task_blocks; then
+  if $ADAPT_ISSUES; then
+    adapt_invalid_issues || exit 1
+    validate_task_blocks
+  else
+    exit 1
+  fi
+fi
 
 if $VALIDATE_ONLY; then
   print_plan
