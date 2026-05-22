@@ -5,25 +5,29 @@ import { homedir, tmpdir } from 'os';
 import { run } from '@ai-hero/sandcastle';
 import { docker } from '@ai-hero/sandcastle/sandboxes/docker';
 
-// Tasks are passed as delimiter-separated, prevalidated blocks by run-parallel.sh.
 const tasksFile = process.env.SANDCASTLE_TASKS_FILE;
 if (!tasksFile) {
   console.error('SANDCASTLE_TASKS_FILE env var not set.');
   process.exit(1);
 }
 
-const tasks = readFileSync(tasksFile, 'utf8')
-  .split('---RUN-PARALLEL-TASK---')
-  .map((l) => l.trim())
-  .filter(Boolean);
-
-if (tasks.length === 0) {
-  console.error('No tasks found.');
+const stage = process.env.SANDCASTLE_STAGE;
+if (stage !== 'implementer' && stage !== 'reviewer') {
+  console.error('SANDCASTLE_STAGE must be "implementer" or "reviewer".');
   process.exit(1);
 }
 
-const CONCURRENCY = parseInt(process.env.SANDCASTLE_CONCURRENCY ?? '1', 10);
-const REVIEW_ENABLED = process.env.SANDCASTLE_NO_REVIEW !== 'true';
+const worktreeDir = process.env.SANDCASTLE_WORKDIR;
+if (!worktreeDir) {
+  console.error('SANDCASTLE_WORKDIR env var not set.');
+  process.exit(1);
+}
+
+const prompt = readFileSync(tasksFile, 'utf8').trim();
+if (!prompt) {
+  console.error('Empty prompt in SANDCASTLE_TASKS_FILE.');
+  process.exit(1);
+}
 
 // Copy only auth.json (not config.toml) to a clean temp dir per run.
 // Reasons: macOS xattrs on the original prevent Docker Desktop bind-mounts from reading it;
@@ -85,44 +89,20 @@ const codexChatGPT = {
   },
 };
 
-async function runBatch(tasks: string[]): Promise<void> {
-  const queue = tasks.map((task, i) => ({ task, i }));
-  let failures = 0;
-  const worker = async (): Promise<void> => {
-    while (queue.length > 0) {
-      const item = queue.shift();
-      if (!item) break;
-      try {
-        const implementerPrompt = item.task;
-        const reviewerPrompt = item.task.replace('Role: implementer', 'Role: reviewer');
-        await run({
-          agent: codexChatGPT as never,
-          sandbox,
-          prompt: implementerPrompt,
-          name: `task-${item.i + 1}-implementer`,
-          maxIterations: Number(process.env.SANDCASTLE_MAX_ITERATIONS ?? '5'),
-        });
-        if (REVIEW_ENABLED) {
-          await run({
-            agent: codexChatGPT as never,
-            sandbox,
-            prompt: reviewerPrompt,
-            name: `task-${item.i + 1}-reviewer`,
-            maxIterations: Number(process.env.SANDCASTLE_MAX_ITERATIONS ?? '5'),
-          });
-        }
-      } catch (err) {
-        console.error(`task-${item.i + 1} failed:`, (err as Error).message ?? err);
-        failures += 1;
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, worker));
-  if (failures > 0) {
-    process.exitCode = 1;
-  }
+console.log(`Running sandcastle stage: ${stage} in ${worktreeDir}`);
+
+try {
+  await run({
+    agent: codexChatGPT as never,
+    sandbox,
+    cwd: worktreeDir,
+    prompt,
+    name: stage,
+    maxIterations: Number(process.env.SANDCASTLE_MAX_ITERATIONS ?? '5'),
+  });
+} catch (err) {
+  console.error(`Stage ${stage} failed:`, (err as Error).message ?? err);
+  process.exit(1);
 }
 
-console.log(`Running ${tasks.length} task(s) via sandcastle + codex (concurrency: ${CONCURRENCY}, review: ${REVIEW_ENABLED ? 'on' : 'off'})...`);
-await runBatch(tasks);
-console.log('All tasks completed. Review the created branches.');
+console.log(`Stage ${stage} completed.`);

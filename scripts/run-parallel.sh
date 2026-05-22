@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
 # Codex flags for unattended runs.
 # If your codex version supports --approval-policy, set it here, e.g.:
 #   CODEX_AFK_FLAGS="--approval-policy always"
@@ -67,7 +69,6 @@ if ! $FROM_ISSUES && [[ -z "$TASKS_FILE" ]]; then
 fi
 
 # --- Resolve task list ---
-TASKS=()
 TASK_HEADINGS=()
 TASK_SUMMARIES=()
 TASK_FILES=()
@@ -293,31 +294,67 @@ changed_files() {
   done
 }
 
-role_prompt() {
-  local role="$1"
-  local i="$2"
-  cat <<EOF
-Parallel agent runner wrapper
-
-Role: $role
-
+contract_rules() {
+  cat <<'EOF'
 Follow project instructions first.
 Agents may read outside FILES for context.
 Agents may only edit files listed in FILES.
 Files listed in DO NOT TOUCH must not be edited.
 Stop and report the needed task update if broader edit scope is required.
 The runner owns checks, scope validation, commits, and GitHub status updates.
-
-Validated task:
-$(format_task_block "$i")
 EOF
+}
+
+load_role_prompt() {
+  local role="$1"
+  local i="$2"
+  local agents_dir="${RUNNER_AGENTS_DIR:-$SCRIPT_DIR/../agents}"
+  local prompt_file="$agents_dir/${role}.md"
+  if [[ ! -f "$prompt_file" ]]; then
+    echo "error: role prompt file not found: $prompt_file" >&2
+    exit 1
+  fi
+  local tb_file
+  tb_file=$(mktemp)
+  {
+    contract_rules
+    printf '\n'
+    format_task_block "$i"
+  } > "$tb_file"
+  awk -v tb="$tb_file" '
+    /\{\{TASK_BLOCK\}\}/ {
+      while ((getline line < tb) > 0) print line
+      next
+    }
+    { print }
+  ' "$prompt_file"
+  rm -f "$tb_file"
 }
 
 run_agent_stage() {
   local role="$1"
   local prompt="$2"
   export RUNNER_PARALLEL_STAGE="$role"
-  if [[ "$AGENT" == "claude" ]]; then
+  if $use_sandcastle; then
+    local prompt_file exit_code
+    prompt_file=$(mktemp)
+    printf '%s' "$prompt" > "$prompt_file"
+    if [[ -n "${SANDCASTLE_RUNNER:-}" ]]; then
+      SANDCASTLE_TASKS_FILE="$prompt_file" \
+      SANDCASTLE_STAGE="$role" \
+      SANDCASTLE_WORKDIR="$(pwd)" \
+        bash -c "$SANDCASTLE_RUNNER"
+    else
+      SANDCASTLE_TASKS_FILE="$prompt_file" \
+      SANDCASTLE_STAGE="$role" \
+      SANDCASTLE_WORKDIR="$(pwd)" \
+        "${SANDCASTLE_ROOT}/.sandcastle/node_modules/.bin/tsx" \
+        "${SANDCASTLE_ROOT}/.sandcastle/run.ts"
+    fi
+    exit_code=$?
+    rm -f "$prompt_file"
+    return $exit_code
+  elif [[ "$AGENT" == "claude" ]]; then
     claude --dangerously-skip-permissions --model "$MODEL" --effort "$EFFORT" "$prompt"
   else
     # shellcheck disable=SC2086
@@ -409,7 +446,7 @@ run_task_pipeline() {
   post_issue_comment "$issue" "Started runner pipeline for '$heading' on branch '$branch'."
 
   echo "[$heading] implementer starting"
-  if ! run_agent_stage "implementer" "$(role_prompt "implementer" "$i")" >> "$log_file" 2>&1; then
+  if ! run_agent_stage "implementer" "$(load_role_prompt "implementer" "$i")" >> "$log_file" 2>&1; then
     echo "[$heading] implementer agent failed"
     post_issue_comment "$issue" "Implementer failed for '$heading'. Branch: '$branch'. Log: '$log_file'."
     if has_pipeline_changes "$base_ref"; then
@@ -453,7 +490,7 @@ run_task_pipeline() {
 
   if ! $NO_REVIEW; then
     echo "[$heading] reviewer starting"
-    if ! run_agent_stage "reviewer" "$(role_prompt "reviewer" "$i")" >> "$log_file" 2>&1; then
+    if ! run_agent_stage "reviewer" "$(load_role_prompt "reviewer" "$i")" >> "$log_file" 2>&1; then
       echo "[$heading] reviewer agent failed"
       post_issue_comment "$issue" "Reviewer failed for '$heading'. Branch: '$branch'. Log: '$log_file'."
       if has_pipeline_changes "$base_ref"; then
@@ -520,19 +557,27 @@ else
 fi
 
 validate_task_blocks
-for i in "${!TASK_HEADINGS[@]}"; do
-  TASKS+=("$(role_prompt "implementer" "$i")")
-done
 
 if $VALIDATE_ONLY; then
   print_plan
   exit 0
 fi
 
+# --- Validate role prompt files exist before confirming ---
+agents_dir="${RUNNER_AGENTS_DIR:-$SCRIPT_DIR/../agents}"
+for _role in implementer reviewer; do
+  _prompt_file="$agents_dir/${_role}.md"
+  if [[ ! -f "$_prompt_file" ]]; then
+    echo "error: role prompt file not found: $_prompt_file" >&2
+    exit 1
+  fi
+done
+unset _role _prompt_file
+
 # --- Show tasks and confirm ---
 echo ""
 echo "Tasks to run ($(task_count), concurrency: $CONCURRENCY):"
-for i in "${!TASKS[@]}"; do
+for i in "${!TASK_HEADINGS[@]}"; do
   printf "  %d. %s\n" "$((i+1))" "${TASK_HEADINGS[$i]}"
   printf "     files: %s\n" "$(trim "${TASK_FILES[$i]}")"
   printf "     check: %s\n" "$(trim "${TASK_CHECKS[$i]}")"
@@ -544,7 +589,9 @@ echo ""
 
 # --- Detect execution mode ---
 use_sandcastle=false
-if [[ "$AGENT" == "codex" ]] && command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+if [[ "${SANDCASTLE_FORCE:-false}" == "true" ]]; then
+  use_sandcastle=true
+elif [[ "$AGENT" == "codex" ]] && command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
   if [[ -f ".sandcastle/run.ts" && -f ".sandcastle/package.json" ]]; then
     use_sandcastle=true
   else
@@ -552,37 +599,23 @@ if [[ "$AGENT" == "codex" ]] && command -v docker &>/dev/null && docker info &>/
   fi
 fi
 
-# --- Sandcastle path ---
-if $use_sandcastle; then
-  echo "Docker detected. Running via sandcastle..."
-
-  # Install deps on first use
+# --- Sandcastle setup (if applicable) ---
+if $use_sandcastle && [[ -z "${SANDCASTLE_RUNNER:-}" ]]; then
+  echo "Sandcastle mode active. Preparing Docker environment..."
   if [[ ! -f ".sandcastle/node_modules/.bin/tsx" ]]; then
     echo "Installing .sandcastle dependencies (first run)..."
     npm install --prefix .sandcastle --silent
   fi
-
-  # Build Docker image on first use (bakes in host UID/GID)
   if ! docker image inspect "sandcastle:$(basename "$(pwd)")" &>/dev/null 2>&1; then
     echo "Building Docker image (first run)..."
     .sandcastle/node_modules/.bin/sandcastle docker build-image
   fi
-
-  TASKS_FILE_TMP=$(mktemp)
-  for task in "${TASKS[@]}"; do
-    printf '%s\n%s\n' "---RUN-PARALLEL-TASK---" "$task"
-  done > "$TASKS_FILE_TMP"
-  SANDCASTLE_TASKS_FILE="$TASKS_FILE_TMP" \
-  SANDCASTLE_CONCURRENCY="$CONCURRENCY" \
-  SANDCASTLE_NO_REVIEW="$NO_REVIEW" \
-    .sandcastle/node_modules/.bin/tsx .sandcastle/run.ts
-  rm -f "$TASKS_FILE_TMP"
-  exit 0
 fi
 
 # --- Worktree path ---
 echo "Running via git worktrees..."
 BASE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+SANDCASTLE_ROOT="$(pwd)"
 WORKTREE_ROOT=".worktrees"
 mkdir -p "$WORKTREE_ROOT"
 
@@ -594,7 +627,7 @@ slugify() {
     | sed 's/-\+/-/g' | sed 's/^-//;s/-$//' | cut -c1-40
 }
 
-for i in "${!TASKS[@]}"; do
+for i in "${!TASK_HEADINGS[@]}"; do
   # Respect concurrency limit before launching the next agent
   while [[ $(jobs -r | wc -l | tr -d ' ') -ge $CONCURRENCY ]]; do
     sleep 1
