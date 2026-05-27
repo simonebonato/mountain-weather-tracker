@@ -25,6 +25,9 @@ RUN if ! getent group $AGENT_GID > /dev/null 2>&1; then \
     fi \
   && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
 
+# Install just (command runner used by project justfiles)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
 # Install Codex as root before switching to agent user
 RUN npm install -g @openai/codex
 

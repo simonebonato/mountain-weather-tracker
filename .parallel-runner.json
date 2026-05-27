@@ -1,0 +1,13 @@
+{
+  "concurrency": 2,
+  "implementer": {
+    "agent": "claude",
+    "model": "claude-sonnet-4-6",
+    "effort": "low"
+  },
+  "reviewer": {
+    "agent": "claude",
+    "model": "claude-sonnet-4-6",
+    "effort": "high"
+  }
+}

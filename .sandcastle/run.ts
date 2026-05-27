@@ -1,6 +1,15 @@
-import { readFileSync, mkdtempSync, writeFileSync } from 'fs';
+import {
+  readFileSync,
+  readdirSync,
+  mkdtempSync,
+  writeFileSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+} from 'fs';
 import { execSync } from 'child_process';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { homedir, tmpdir } from 'os';
 import { run } from '@ai-hero/sandcastle';
 import { docker } from '@ai-hero/sandcastle/sandboxes/docker';
@@ -42,7 +51,16 @@ if (!ghToken) {
   try { ghToken = execSync('gh auth token', { encoding: 'utf8' }).trim(); } catch {}
 }
 
+// Derive the Docker image name from the main project root, not the worktree.
+// When run inside a worktree (.worktrees/issue-N-slug), process.cwd() is the
+// worktree path whose basename differs from the image that was built from the
+// main project (sandcastle:<project-basename>). SANDCASTLE_ROOT is forwarded
+// by run-parallel.sh to pin the image name to the correct project.
+const sandcastleRoot = process.env.SANDCASTLE_ROOT ?? worktreeDir;
+const imageName = `sandcastle:${basename(sandcastleRoot)}`;
+
 const sandbox = docker({
+  imageName,
   env: { GH_TOKEN: ghToken },
   mounts: [{ hostPath: codexTmp, sandboxPath: '/home/agent/.codex' }],
 });
@@ -91,17 +109,63 @@ const codexChatGPT = {
 
 console.log(`Running sandcastle stage: ${stage} in ${worktreeDir}`);
 
-try {
-  await run({
-    agent: codexChatGPT as never,
-    sandbox,
-    cwd: worktreeDir,
-    prompt,
-    name: stage,
-    maxIterations: Number(process.env.SANDCASTLE_MAX_ITERATIONS ?? '5'),
+const logsDir = join(worktreeDir, '.sandcastle', 'logs');
+
+// Stream the inner sandcastle log to stdout in real time so the outer log
+// (which captures this process's stdout) stays live during long runs.
+// Polls logsDir every 200 ms until a *-<stage>.log file appears, then reads
+// new bytes as they arrive. Drains remaining content after `done` settles.
+function streamInnerLog(done: Promise<unknown>): void {
+  let logPath: string | undefined;
+  let position = 0;
+
+  function tick(): void {
+    try {
+      if (!logPath) {
+        const files = readdirSync(logsDir);
+        const match = files.find(f => f.endsWith(`-${stage}.log`));
+        if (match) {
+          logPath = join(logsDir, match);
+          console.log(`[stream] ${logPath}`);
+        }
+      }
+      if (logPath) {
+        const size = statSync(logPath).size;
+        if (size > position) {
+          const buf = Buffer.alloc(size - position);
+          const fd = openSync(logPath, 'r');
+          readSync(fd, buf, 0, buf.length, position);
+          closeSync(fd);
+          process.stdout.write(buf);
+          position = size;
+        }
+      }
+    } catch {}
+  }
+
+  const interval = setInterval(tick, 200);
+  done.finally(() => {
+    clearInterval(interval);
+    tick(); // final drain
   });
-} catch (err) {
-  console.error(`Stage ${stage} failed:`, (err as Error).message ?? err);
+}
+
+let runError: unknown;
+const runPromise = run({
+  agent: codexChatGPT as never,
+  sandbox,
+  cwd: worktreeDir,
+  prompt,
+  name: stage,
+  maxIterations: Number(process.env.SANDCASTLE_MAX_ITERATIONS ?? '1'),
+}).catch((err: unknown) => { runError = err; });
+
+streamInnerLog(runPromise);
+
+await runPromise;
+
+if (runError) {
+  console.error(`Stage ${stage} failed:`, (runError as Error).message ?? runError);
   process.exit(1);
 }
 

@@ -39,7 +39,7 @@ EOF
 FROM_ISSUES=false
 LABEL="parallel"
 TASKS_FILE=""
-CONCURRENCY=1
+CONCURRENCY=""
 AGENT="codex"
 MODEL="gpt-5.3-codex"
 EFFORT="normal"
@@ -47,6 +47,42 @@ VALIDATE_ONLY=false
 NO_REVIEW=false
 COMMENT_STATUS=true
 ADAPT_ISSUES=false
+
+read_json_field() {
+  local file="$1" keypath="$2"
+  python3 - "$file" "$keypath" <<'PY' 2>/dev/null
+import sys, json
+file, keypath = sys.argv[1], sys.argv[2]
+try:
+    with open(file) as f:
+        d = json.load(f)
+    v = d
+    for k in keypath.split('.'):
+        v = v[k]
+    if v is not None:
+        print(v)
+except Exception:
+    pass
+PY
+}
+
+load_runner_config() {
+  local config_file=".parallel-runner.json"
+  [[ -f "$config_file" ]] || return 0
+  local val
+  # concurrency: CLI wins if explicitly provided (CONCURRENCY non-empty)
+  if [[ -z "$CONCURRENCY" ]]; then
+    val=$(read_json_field "$config_file" "concurrency")
+    [[ -n "$val" ]] && CONCURRENCY="$val" || true
+  fi
+  # per-stage agent/model/effort: config overrides CLI defaults
+  val=$(read_json_field "$config_file" "implementer.agent");  [[ -n "$val" ]] && IMPLEMENTER_AGENT="$val" || true
+  val=$(read_json_field "$config_file" "implementer.model");  [[ -n "$val" ]] && IMPLEMENTER_MODEL="$val" || true
+  val=$(read_json_field "$config_file" "implementer.effort"); [[ -n "$val" ]] && IMPLEMENTER_EFFORT="$val" || true
+  val=$(read_json_field "$config_file" "reviewer.agent");     [[ -n "$val" ]] && REVIEWER_AGENT="$val" || true
+  val=$(read_json_field "$config_file" "reviewer.model");     [[ -n "$val" ]] && REVIEWER_MODEL="$val" || true
+  val=$(read_json_field "$config_file" "reviewer.effort");    [[ -n "$val" ]] && REVIEWER_EFFORT="$val" || true
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -65,6 +101,16 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown flag: $1"; usage ;;
   esac
 done
+
+# Per-stage config: CLI flags are defaults; .parallel-runner.json overrides per-stage.
+IMPLEMENTER_AGENT="$AGENT"
+IMPLEMENTER_MODEL="$MODEL"
+IMPLEMENTER_EFFORT="$EFFORT"
+REVIEWER_AGENT="$AGENT"
+REVIEWER_MODEL="$MODEL"
+REVIEWER_EFFORT="$EFFORT"
+load_runner_config
+CONCURRENCY="${CONCURRENCY:-1}"
 
 if ! $FROM_ISSUES && [[ -z "$TASKS_FILE" ]]; then
   usage
@@ -148,7 +194,11 @@ reparse_task_body() {
   TASK_DETAILS[$i]=""
 
   while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ "$line" =~ ^##[[:space:]]+Task: ]] && { current_field=""; continue; }
+    if [[ "$line" =~ ^##[[:space:]]+Task:[[:space:]]*(.+)[[:space:]]*$ ]]; then
+      TASK_HEADINGS[$i]="$(trim "${BASH_REMATCH[1]}")"
+      current_field=""
+      continue
+    fi
     if [[ "$line" =~ ^(TASK|FILES|DO[[:space:]]+NOT[[:space:]]+TOUCH|CHECK|DONE[[:space:]]+WHEN|DETAILS):[[:space:]]*(.*)$ ]]; then
       current_field="${BASH_REMATCH[1]}"
       set_task_field "$i" "$current_field" "${BASH_REMATCH[2]}"
@@ -168,6 +218,8 @@ parse_task_blocks() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^###[[:space:]]+RUNNER[[:space:]]+ISSUE[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
       current_issue="${BASH_REMATCH[1]}"
+      current_index=-1
+      current_field=""
       continue
     fi
 
@@ -477,11 +529,30 @@ load_role_prompt() {
   rm -f "$tb_file"
 }
 
+stage_uses_sandcastle() {
+  local role="$1"
+  local agent
+  [[ "$role" == "implementer" ]] && agent="$IMPLEMENTER_AGENT" || agent="$REVIEWER_AGENT"
+  [[ "$agent" == "codex" ]] && $_docker_available && $_sandcastle_files_present
+}
+
+any_stage_uses_sandcastle() {
+  stage_uses_sandcastle "implementer" || stage_uses_sandcastle "reviewer"
+}
+
 run_agent_stage() {
   local role="$1"
   local prompt="$2"
   export RUNNER_PARALLEL_STAGE="$role"
-  if $use_sandcastle; then
+
+  local stage_agent stage_model stage_effort
+  if [[ "$role" == "implementer" ]]; then
+    stage_agent="$IMPLEMENTER_AGENT"; stage_model="$IMPLEMENTER_MODEL"; stage_effort="$IMPLEMENTER_EFFORT"
+  else
+    stage_agent="$REVIEWER_AGENT";    stage_model="$REVIEWER_MODEL";    stage_effort="$REVIEWER_EFFORT"
+  fi
+
+  if stage_uses_sandcastle "$role"; then
     local prompt_file exit_code
     prompt_file=$(mktemp)
     printf '%s' "$prompt" > "$prompt_file"
@@ -489,19 +560,21 @@ run_agent_stage() {
       SANDCASTLE_TASKS_FILE="$prompt_file" \
       SANDCASTLE_STAGE="$role" \
       SANDCASTLE_WORKDIR="$(pwd)" \
+      SANDCASTLE_ROOT="$SANDCASTLE_ROOT" \
         bash -c "$SANDCASTLE_RUNNER"
     else
       SANDCASTLE_TASKS_FILE="$prompt_file" \
       SANDCASTLE_STAGE="$role" \
       SANDCASTLE_WORKDIR="$(pwd)" \
+      SANDCASTLE_ROOT="$SANDCASTLE_ROOT" \
         "${SANDCASTLE_ROOT}/.sandcastle/node_modules/.bin/tsx" \
         "${SANDCASTLE_ROOT}/.sandcastle/run.ts"
     fi
     exit_code=$?
     rm -f "$prompt_file"
     return $exit_code
-  elif [[ "$AGENT" == "claude" ]]; then
-    claude --dangerously-skip-permissions --model "$MODEL" --effort "$EFFORT" "$prompt"
+  elif [[ "$stage_agent" == "claude" ]]; then
+    claude --dangerously-skip-permissions --model "$stage_model" --effort "$stage_effort" "$prompt"
   else
     # shellcheck disable=SC2086
     codex $CODEX_AFK_FLAGS "$prompt"
@@ -547,8 +620,15 @@ commit_allowed_changes() {
 }
 
 run_task_check() {
-  local command_text="$1"
-  local log_file="$2"
+  local command_text log_file
+  command_text="$(trim "$1")"
+  log_file="$2"
+  # Fall back from 'just <recipe>' to 'npm run <recipe>' when just is not installed.
+  # Projects with a justfile typically map just recipes to npm scripts, so this
+  # lets the runner check work on hosts that don't have just in PATH.
+  if [[ "$command_text" == just\ * ]] && ! command -v just &>/dev/null; then
+    command_text="npm run ${command_text#just }"
+  fi
   bash -lc "$command_text" >> "$log_file" 2>&1
 }
 
@@ -592,6 +672,7 @@ run_task_pipeline() {
   post_issue_comment "$issue" "Started runner pipeline for '$heading' on branch '$branch'."
 
   echo "[$heading] implementer starting"
+  stage_uses_sandcastle "implementer" && echo "  inner log: $(pwd)/.sandcastle/logs/"
   if ! run_agent_stage "implementer" "$(load_role_prompt "implementer" "$i")" >> "$log_file" 2>&1; then
     echo "[$heading] implementer agent failed"
     post_issue_comment "$issue" "Implementer failed for '$heading'. Branch: '$branch'. Log: '$log_file'."
@@ -636,6 +717,7 @@ run_task_pipeline() {
 
   if ! $NO_REVIEW; then
     echo "[$heading] reviewer starting"
+    stage_uses_sandcastle "reviewer" && echo "  inner log: $(pwd)/.sandcastle/logs/"
     if ! run_agent_stage "reviewer" "$(load_role_prompt "reviewer" "$i")" >> "$log_file" 2>&1; then
       echo "[$heading] reviewer agent failed"
       post_issue_comment "$issue" "Reviewer failed for '$heading'. Branch: '$branch'. Log: '$log_file'."
@@ -741,19 +823,22 @@ read -rp "Confirm? [y/N] " confirm
 echo ""
 
 # --- Detect execution mode ---
-use_sandcastle=false
+_docker_available=false
+_sandcastle_files_present=false
 if [[ "${SANDCASTLE_FORCE:-false}" == "true" ]]; then
-  use_sandcastle=true
-elif [[ "$AGENT" == "codex" ]] && command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+  _docker_available=true
+  _sandcastle_files_present=true
+elif command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+  _docker_available=true
   if [[ -f ".sandcastle/run.ts" && -f ".sandcastle/package.json" ]]; then
-    use_sandcastle=true
-  else
+    _sandcastle_files_present=true
+  elif [[ "$IMPLEMENTER_AGENT" == "codex" || "$REVIEWER_AGENT" == "codex" ]]; then
     echo "Docker available but .sandcastle/run.ts or package.json not found — falling back to worktree mode."
   fi
 fi
 
 # --- Sandcastle setup (if applicable) ---
-if $use_sandcastle && [[ -z "${SANDCASTLE_RUNNER:-}" ]]; then
+if any_stage_uses_sandcastle && [[ -z "${SANDCASTLE_RUNNER:-}" ]]; then
   echo "Sandcastle mode active. Preparing Docker environment..."
   if [[ ! -f ".sandcastle/node_modules/.bin/tsx" ]]; then
     echo "Installing .sandcastle dependencies (first run)..."
@@ -806,13 +891,18 @@ for i in "${!TASK_HEADINGS[@]}"; do
   ) &
 
   PIDS+=($!)
+  _launched=${#PIDS[@]}
+  _total=${#TASK_HEADINGS[@]}
+  _queued=$(( _total - _launched ))
   echo "  started: $branch  (pid $!  log: $log_path)"
+  echo "  [status] launched: $_launched/$_total, queued: $_queued"
 done
 
 # --- Wait for all agents ---
 echo ""
 echo "Waiting for all agents to finish..."
 failed=0
+_total=${#PIDS[@]}
 for i in "${!PIDS[@]}"; do
   if ! wait "${PIDS[$i]}"; then
     echo "  FAILED: ${BRANCHES[$i]}"
@@ -821,6 +911,8 @@ for i in "${!PIDS[@]}"; do
   else
     echo "  PASSED: ${BRANCHES[$i]}"
   fi
+  _remaining=$(( _total - i - 1 ))
+  [[ $_remaining -gt 0 ]] && echo "  [status] $_remaining task(s) still finishing"
 done
 
 echo ""
