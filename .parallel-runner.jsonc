@@ -1,0 +1,45 @@
+{
+  // Shared config for the two repo-owned workflow surfaces.
+  // Edit only the section used by the command you run.
+
+  "parallelRunner": {
+    "fromIssues": true,
+    "tasksFile": "",
+    "concurrency": 1,
+    "label": "parallel",
+    "noReview": false,
+    "commentStatus": true,
+    "validateOnly": false,
+    "adaptIssues": false,
+    "implementer": {
+      "agent": "claude",
+      "model": "claude-haiku-4-5-20251001",
+      "effort": "low"
+    },
+    "reviewer": {
+      "agent": "claude",
+      "model": "claude-opus-4-7",
+      "effort": "high"
+    }
+  },
+
+  "sandcastleWorkflow": {
+    "projectLocalPackage": "@ai-hero/sandcastle",
+    "dotfilesPath": "/Users/simone.bonato/dotfiles",
+    "defaultProfile": "codex",
+    "template": "sequential-reviewer",
+    "sandbox": "docker",
+    "backlog": "github-issues",
+    "profiles": {
+      "codex": {
+        "supported": true,
+        "agent": "codex"
+      },
+      "claude-code": {
+        "supported": false,
+        "agent": "claude-code",
+        "warning": "Use at your own risk. Claude Code in the Sandcastle workflow is not a supported default."
+      }
+    }
+  }
+}

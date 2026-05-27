@@ -19,7 +19,7 @@
 ## Parallel agents
 
 Mode: github-issues
-Label: parallel
+Label: Sandcastle
 
 ## Architecture notes
 
@@ -28,7 +28,7 @@ Label: parallel
 
 ## Creating parallel issues
 
-Issues labeled `parallel` must use the task block format below. The runner will reject any issue body that contains prose before the first `## Task:` heading.
+Issues labeled `Sandcastle` must use the task block format below. The runner will reject any issue body that contains prose before the first `## Task:` heading.
 
 ```
 ## Task: <short imperative heading>

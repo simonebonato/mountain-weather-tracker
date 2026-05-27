@@ -1,8 +1,0 @@
-{
-  "type": "module",
-  "private": true,
-  "dependencies": {
-    "@ai-hero/sandcastle": "latest",
-    "tsx": "latest"
-  }
-}

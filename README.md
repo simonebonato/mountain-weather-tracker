@@ -181,3 +181,20 @@ Mode: github-issues — Label: `parallel`
 # 2. Kick off parallel agents
 ./scripts/run-parallel.sh --from-issues --label parallel
 ```
+
+## Sandcastle workflow
+
+Use the repo-owned wrapper:
+
+```bash
+./scripts/run-sandcastle.sh
+```
+
+
+## Parallel Runner
+
+Task-contract workflow:
+
+```bash
+./scripts/run-parallel.sh --from-issues --label Sandcastle
+```
