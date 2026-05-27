@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { getDatabase, type AppDatabase } from '$lib/server/db/index';
 import { keyPoints, outings, sources } from '$lib/server/db/schema';
