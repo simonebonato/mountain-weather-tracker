@@ -14,6 +14,10 @@ const migrations = [
   {
     id: '0002_source_reliability',
     path: resolve(process.cwd(), 'drizzle/0002_source_reliability.sql')
+  },
+  {
+    id: '0003_agent_settings',
+    path: resolve(process.cwd(), 'drizzle/0003_agent_settings.sql')
   }
 ] as const;
 

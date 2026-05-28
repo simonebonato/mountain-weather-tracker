@@ -109,5 +109,10 @@ export const verdictSnapshots = sqliteTable('verdict_snapshots', {
   seenAt: integer('seen_at', { mode: 'timestamp_ms' }).notNull()
 });
 
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull()
+});
+
 export type OutingRow = typeof outings.$inferSelect;
 export type NewOutingRow = typeof outings.$inferInsert;

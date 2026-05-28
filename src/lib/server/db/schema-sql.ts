@@ -63,4 +63,9 @@ CREATE TABLE IF NOT EXISTS verdict_snapshots (
   verdict TEXT NOT NULL CHECK (verdict IN ('Good', 'Uncertain', 'Bad')),
   seen_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY NOT NULL,
+  value TEXT NOT NULL
+);
 `;

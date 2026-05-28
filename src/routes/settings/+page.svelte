@@ -20,6 +20,69 @@
     <a href="/" class="back-link">← Dashboard</a>
   </header>
 
+  <section class="agent-section" aria-labelledby="agent-heading">
+    <h2 id="agent-heading">AI Agent</h2>
+
+    <div class="agent-availability">
+      <div class="availability-item">
+        <span
+          class="indicator"
+          class:available={data.credentials.codex}
+          aria-label={data.credentials.codex
+            ? 'Codex available'
+            : 'Codex not detected'}
+        ></span>
+        <span>Codex</span>
+        <span class="availability-label">
+          {data.credentials.codex ? 'Available' : 'Not detected'}
+        </span>
+      </div>
+      <div class="availability-item">
+        <span
+          class="indicator"
+          class:available={data.credentials.claude}
+          aria-label={data.credentials.claude
+            ? 'Claude available'
+            : 'Claude not detected'}
+        ></span>
+        <span>Claude</span>
+        <span class="availability-label">
+          {data.credentials.claude ? 'Available' : 'Not detected'}
+        </span>
+      </div>
+    </div>
+
+    {#if !data.credentials.codex && !data.credentials.claude}
+      <div class="setup-prompt">
+        <p>
+          No AI agent credentials detected. Set up
+          <strong>Codex</strong> (<code>~/.codex/</code>) or
+          <strong>Claude</strong> (<code>~/.claude/</code>) to enable
+          agent-based weather fetching.
+        </p>
+      </div>
+    {:else if data.credentials.codex && data.credentials.claude}
+      <form method="POST" action="?/setActiveAgent" class="agent-selector-form">
+        <label>
+          <span>Active agent</span>
+          <select name="agent">
+            <option value="codex" selected={data.activeAgent === 'codex'}
+              >Codex</option
+            >
+            <option value="claude" selected={data.activeAgent === 'claude'}
+              >Claude</option
+            >
+          </select>
+        </label>
+        <button type="submit">Save</button>
+      </form>
+    {:else}
+      <p class="active-agent-label">
+        Active agent: <strong>{data.activeAgent ?? '—'}</strong>
+      </p>
+    {/if}
+  </section>
+
   <section aria-labelledby="sources-heading">
     <h2 id="sources-heading" class="sr-only">Sources</h2>
 
@@ -149,6 +212,73 @@
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border-width: 0;
+  }
+
+  .agent-section {
+    padding: 20px;
+    border: 1px solid #d8ddd2;
+    border-radius: 8px;
+    background: #ffffff;
+    margin-bottom: 24px;
+  }
+
+  .agent-section h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+
+  .agent-availability {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 16px;
+  }
+
+  .availability-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+  }
+
+  .indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #c0c7bc;
+  }
+
+  .indicator.available {
+    background: #3a9e6f;
+  }
+
+  .availability-label {
+    color: #667365;
+    font-size: 0.8rem;
+  }
+
+  .setup-prompt {
+    padding: 12px 16px;
+    border: 1px solid #e8c97a;
+    border-radius: 6px;
+    background: #fdf8ec;
+    font-size: 0.9rem;
+  }
+
+  .setup-prompt p {
+    line-height: 1.5;
+  }
+
+  .agent-selector-form {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  .active-agent-label {
+    font-size: 0.9rem;
+    color: #4e5b4d;
   }
 
   .source-list {
