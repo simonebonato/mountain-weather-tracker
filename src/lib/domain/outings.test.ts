@@ -138,24 +138,203 @@ describe('deterministic fallback forecasts', () => {
 });
 
 describe('activity-aware daily verdicts', () => {
-  it('applies the via ferrata thunderstorm blocker only above the threshold', () => {
-    expect(
-      computeDayVerdict(
-        { ...goodMetrics, thunderstormProbabilityPct: 30 },
-        'via_ferrata'
-      )
-    ).toBe('Good');
-    expect(
-      computeDayVerdict(
-        { ...goodMetrics, thunderstormProbabilityPct: 31 },
-        'via_ferrata'
-      )
-    ).toBe('Bad');
+  describe('via ferrata thunderstorm hard blocker', () => {
+    it('returns Good below the 30% threshold', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, thunderstormProbabilityPct: 29 },
+          'via_ferrata'
+        )
+      ).toBe('Good');
+    });
+
+    it('returns Good at exactly the 30% threshold', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, thunderstormProbabilityPct: 30 },
+          'via_ferrata'
+        )
+      ).toBe('Good');
+    });
+
+    it('returns Bad above the 30% threshold', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, thunderstormProbabilityPct: 31 },
+          'via_ferrata'
+        )
+      ).toBe('Bad');
+    });
+
+    it('returns Bad regardless of other variables when above threshold', () => {
+      expect(
+        computeDayVerdict(
+          {
+            ...goodMetrics,
+            thunderstormProbabilityPct: 65,
+            precipitationMm: 0,
+            windKmh: 0,
+            visibilityKm: 50,
+            temperatureC: 20
+          },
+          'via_ferrata'
+        )
+      ).toBe('Bad');
+    });
   });
 
-  it('includes ski touring avalanche risk in the day verdict', () => {
-    expect(
-      computeDayVerdict({ ...goodMetrics, avalancheRisk: 4 }, 'ski_touring')
-    ).toBe('Bad');
+  describe('activity-specific verdicts for hiking', () => {
+    it('uses base variable scoring only', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, precipitationMm: 0, windKmh: 12, visibilityKm: 18 },
+          'hiking'
+        )
+      ).toBe('Good');
+    });
+
+    it('returns Uncertain when precipitation is high', () => {
+      expect(
+        computeDayVerdict({ ...goodMetrics, precipitationMm: 15 }, 'hiking')
+      ).toBe('Uncertain');
+    });
+
+    it('returns Bad when multiple base variables exceed threshold', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, precipitationMm: 15, windKmh: 60 },
+          'hiking'
+        )
+      ).toBe('Bad');
+    });
+  });
+
+  describe('activity-specific verdicts for skiing', () => {
+    it('includes snow depth and freeze level scoring', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, snowDepthCm: 45, freezeLevelM: 1800 },
+          'skiing'
+        )
+      ).toBe('Good');
+    });
+
+    it('returns Uncertain when snow depth is critically low', () => {
+      expect(
+        computeDayVerdict({ ...goodMetrics, snowDepthCm: 5 }, 'skiing')
+      ).toBe('Uncertain');
+    });
+
+    it('returns Bad when snow depth and other factors combine', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, snowDepthCm: 5, windKmh: 60 },
+          'skiing'
+        )
+      ).toBe('Bad');
+    });
+
+    it('returns Uncertain when freeze level is extreme', () => {
+      expect(
+        computeDayVerdict({ ...goodMetrics, freezeLevelM: 600 }, 'skiing')
+      ).toBe('Uncertain');
+    });
+
+    it('returns Bad when both snow depth and freeze level are extreme', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, snowDepthCm: 5, freezeLevelM: 600 },
+          'skiing'
+        )
+      ).toBe('Bad');
+    });
+  });
+
+  describe('activity-specific verdicts for snowshoeing', () => {
+    it('includes snow depth and freeze level scoring like skiing', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, snowDepthCm: 45, freezeLevelM: 1800 },
+          'snowshoeing'
+        )
+      ).toBe('Good');
+    });
+
+    it('returns Uncertain when snow depth is critically low', () => {
+      expect(
+        computeDayVerdict({ ...goodMetrics, snowDepthCm: 5 }, 'snowshoeing')
+      ).toBe('Uncertain');
+    });
+
+    it('returns Bad when snow depth and other factors combine', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, snowDepthCm: 5, windKmh: 60 },
+          'snowshoeing'
+        )
+      ).toBe('Bad');
+    });
+  });
+
+  describe('activity-specific verdicts for ski touring', () => {
+    it('includes snow depth, wind, and avalanche risk scoring', () => {
+      expect(
+        computeDayVerdict(
+          {
+            ...goodMetrics,
+            snowDepthCm: 45,
+            freezeLevelM: 1800,
+            windKmh: 15,
+            avalancheRisk: 2
+          },
+          'ski_touring'
+        )
+      ).toBe('Good');
+    });
+
+    it('returns Bad when avalanche risk >= 4', () => {
+      expect(
+        computeDayVerdict({ ...goodMetrics, avalancheRisk: 4 }, 'ski_touring')
+      ).toBe('Bad');
+    });
+
+    it('returns Bad when avalanche risk is 5', () => {
+      expect(
+        computeDayVerdict({ ...goodMetrics, avalancheRisk: 5 }, 'ski_touring')
+      ).toBe('Bad');
+    });
+
+    it('applies stricter wind threshold than general verdict', () => {
+      expect(
+        computeDayVerdict({ ...goodMetrics, windKmh: 25 }, 'ski_touring')
+      ).toBe('Good');
+      expect(
+        computeDayVerdict({ ...goodMetrics, windKmh: 30 }, 'ski_touring')
+      ).toBe('Uncertain');
+    });
+  });
+
+  describe('Good/Uncertain/Bad verdict boundaries', () => {
+    it('returns Good when score < 2', () => {
+      expect(computeDayVerdict(goodMetrics, 'hiking')).toBe('Good');
+    });
+
+    it('returns Uncertain when score >= 2 and < 4', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, precipitationMm: 5, windKmh: 30 },
+          'hiking'
+        )
+      ).toBe('Uncertain');
+    });
+
+    it('returns Bad when score >= 4', () => {
+      expect(
+        computeDayVerdict(
+          { ...goodMetrics, precipitationMm: 15, windKmh: 60 },
+          'hiking'
+        )
+      ).toBe('Bad');
+    });
   });
 });
