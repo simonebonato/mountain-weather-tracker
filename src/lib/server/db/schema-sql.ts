@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS outings (
   current_verdict TEXT NOT NULL DEFAULT 'Uncertain' CHECK (current_verdict IN ('Good', 'Uncertain', 'Bad')),
   last_updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
   summary_json TEXT NOT NULL DEFAULT '{"metrics":[],"days":[]}',
+  scouting_notes TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -39,7 +40,8 @@ CREATE TABLE IF NOT EXISTS sources (
   domain_specialty_score REAL NOT NULL DEFAULT 1,
   reliability_score REAL,
   fetch_instructions TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(name, adapter)
 );
 
 CREATE TABLE IF NOT EXISTS forecasts (

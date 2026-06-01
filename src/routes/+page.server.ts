@@ -35,7 +35,8 @@ export const actions: Actions = {
         areaName: valueFromForm(formData, 'areaName'),
         activity: valueFromForm(formData, 'activity'),
         startDate: valueFromForm(formData, 'startDate'),
-        endDate: valueFromForm(formData, 'endDate')
+        endDate: valueFromForm(formData, 'endDate'),
+        scoutingNotes: valueFromForm(formData, 'scoutingNotes')
       });
 
       return { createdOuting: true };
@@ -46,6 +47,7 @@ export const actions: Actions = {
         activity: valueFromForm(formData, 'activity'),
         startDate: valueFromForm(formData, 'startDate'),
         endDate: valueFromForm(formData, 'endDate'),
+        scoutingNotes: valueFromForm(formData, 'scoutingNotes'),
         error:
           error instanceof Error ? error.message : 'Could not create outing.'
       });

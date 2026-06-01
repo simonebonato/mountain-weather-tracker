@@ -52,6 +52,7 @@ export const outings = sqliteTable('outings', {
   summaryJson: text('summary_json')
     .notNull()
     .default('{"metrics":[],"days":[]}'),
+  scoutingNotes: text('scouting_notes'),
   createdAt: text('created_at')
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`)

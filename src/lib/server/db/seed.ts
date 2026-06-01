@@ -26,6 +26,23 @@ export function seedDemoData(db: AppDatabase): void {
       .run();
   }
 
+  const scoutSource = db
+    .select()
+    .from(sources)
+    .where(eq(sources.adapter, 'scout'))
+    .get();
+
+  if (!scoutSource) {
+    db.insert(sources)
+      .values({
+        name: 'Scout',
+        adapter: 'scout',
+        geographicMatchScore: 1,
+        domainSpecialtyScore: 1
+      })
+      .run();
+  }
+
   const existingOuting = db.select().from(outings).limit(1).get();
   if (existingOuting) {
     return;
