@@ -46,29 +46,48 @@
               </dl>
             </div>
 
-            <form
-              method="POST"
-              action="?/setReliability"
-              class="reliability-form"
-            >
-              <input type="hidden" name="id" value={source.id} />
-              <label>
-                <span>Reliability (1–5)</span>
-                <select name="reliability">
-                  <option value="" selected={source.reliabilityScore === null}
-                    >— unset —</option
-                  >
-                  {#each [1, 2, 3, 4, 5] as score}
-                    <option
-                      value={score}
-                      selected={source.reliabilityScore === score}
-                      >{score}</option
+            <div class="source-forms">
+              <form
+                method="POST"
+                action="?/setReliability"
+                class="reliability-form"
+              >
+                <input type="hidden" name="id" value={source.id} />
+                <label>
+                  <span>Reliability (1–5)</span>
+                  <select name="reliability">
+                    <option value="" selected={source.reliabilityScore === null}
+                      >— unset —</option
                     >
-                  {/each}
-                </select>
-              </label>
-              <button type="submit">Save</button>
-            </form>
+                    {#each [1, 2, 3, 4, 5] as score}
+                      <option
+                        value={score}
+                        selected={source.reliabilityScore === score}
+                        >{score}</option
+                      >
+                    {/each}
+                  </select>
+                </label>
+                <button type="submit">Save</button>
+              </form>
+
+              <form
+                method="POST"
+                action="?/setFetchInstructions"
+                class="fetch-instructions-form"
+              >
+                <input type="hidden" name="id" value={source.id} />
+                <label>
+                  <span>Fetch Instructions</span>
+                  <textarea
+                    name="fetchInstructions"
+                    placeholder="Enter fetch instructions..."
+                    >{source.fetchInstructions || ''}</textarea
+                  >
+                </label>
+                <button type="submit">Save</button>
+              </form>
+            </div>
           </article>
         {/each}
       </div>
@@ -160,11 +179,16 @@
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 20px;
-    align-items: center;
     padding: 16px;
     border: 1px solid #d8ddd2;
     border-radius: 8px;
     background: #ffffff;
+  }
+
+  .source-forms {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
   h3 {
@@ -211,15 +235,26 @@
     text-transform: uppercase;
   }
 
-  select {
-    min-width: 120px;
-    min-height: 42px;
+  select,
+  textarea {
     border: 1px solid #cbd4c7;
     border-radius: 8px;
-    padding: 0 12px;
+    padding: 12px;
     background: #ffffff;
     font: inherit;
     color: #17201b;
+  }
+
+  select {
+    min-width: 120px;
+    min-height: 42px;
+  }
+
+  textarea {
+    min-height: 100px;
+    resize: vertical;
+    font-family: monospace;
+    font-size: 0.9rem;
   }
 
   button {
@@ -253,9 +288,30 @@
     color: #667365;
   }
 
+  .reliability-form,
+  .fetch-instructions-form {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  .fetch-instructions-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .fetch-instructions-form label {
+    display: grid;
+    gap: 6px;
+  }
+
   @media (max-width: 600px) {
     .source-card {
       grid-template-columns: 1fr;
+    }
+
+    .source-forms {
+      flex-direction: column;
     }
 
     .reliability-form {
