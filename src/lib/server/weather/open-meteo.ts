@@ -1,5 +1,8 @@
 import type { ForecastPayload } from '$lib/forecast/types';
 
+const OPEN_METEO_HORIZON_DAYS = 16;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 type WeatherKeyPoint = {
   latitude: number;
   longitude: number;
@@ -16,15 +19,29 @@ type OpenMeteoDailyResponse = {
   reason?: string;
 };
 
+function toIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+export function clampToOpenMeteoHorizon(dates: string[], now = new Date()): string[] {
+  const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const today = toIsoDate(new Date(todayMs));
+  const maxDate = toIsoDate(new Date(todayMs + (OPEN_METEO_HORIZON_DAYS - 1) * DAY_MS));
+  return dates.filter((d) => d >= today && d <= maxDate);
+}
+
 export async function fetchOpenMeteoForecasts(
   keyPoint: WeatherKeyPoint,
-  dates: string[]
+  dates: string[],
+  now = new Date()
 ): Promise<ForecastPayload[]> {
-  if (dates.length === 0) {
+  const withinHorizon = clampToOpenMeteoHorizon(dates, now);
+
+  if (withinHorizon.length === 0) {
     return [];
   }
 
-  const sortedDates = [...dates].sort();
+  const sortedDates = [...withinHorizon].sort();
   const url = new URL('https://api.open-meteo.com/v1/forecast');
   url.searchParams.set('latitude', String(keyPoint.latitude));
   url.searchParams.set('longitude', String(keyPoint.longitude));
@@ -38,7 +55,13 @@ export async function fetchOpenMeteoForecasts(
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Open-Meteo request failed with ${response.status}`);
+    const reason = await response
+      .json()
+      .then((b: { reason?: string }) => b.reason ?? '')
+      .catch(() => '');
+    throw new Error(
+      `Open-Meteo request failed with ${response.status}${reason ? `: ${reason}` : ''}`
+    );
   }
 
   const body = (await response.json()) as OpenMeteoDailyResponse;
