@@ -13,3 +13,7 @@ typecheck:
 
 check:
     npm run check
+
+reset-for-agents:
+    rm -r .worktrees
+    git worktree prune
