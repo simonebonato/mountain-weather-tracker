@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
 
 import type { ForecastPayload } from '$lib/forecast/types';
 import { createDatabase } from '$lib/server/db/index';
@@ -18,11 +19,17 @@ vi.mock('$lib/server/weather/agent', () => ({
     .mockReturnValue({ codex: true, claude: false })
 }));
 
+vi.mock('$lib/server/weather/scout', () => ({
+  fetchScoutForecasts: vi.fn()
+}));
+
 import { fetchOpenMeteoForecasts } from '$lib/server/weather/open-meteo';
 import { fetchAgentForecasts } from '$lib/server/weather/agent';
+import { fetchScoutForecasts } from '$lib/server/weather/scout';
 
 const mockOpenMeteo = vi.mocked(fetchOpenMeteoForecasts);
 const mockAgent = vi.mocked(fetchAgentForecasts);
+const mockScout = vi.mocked(fetchScoutForecasts);
 
 const payload: ForecastPayload = {
   source: 'Open-Meteo',
@@ -178,6 +185,106 @@ describe('refresh adapter routing', () => {
     await expect(
       refreshOutingForecasts(1, { db, force: true })
     ).resolves.not.toThrow();
+    sqlite.close();
+  });
+
+  it('calls fetchScoutForecasts for scout adapter and upserts sources and cache', async () => {
+    mockScout.mockResolvedValue([
+      {
+        sourceName: 'MeteoSvizzera',
+        geographicMatchScore: 0.95,
+        domainSpecialtyScore: 0.9,
+        payloads: [
+          {
+            ...payload,
+            source: 'MeteoSvizzera',
+            date: '2026-06-01'
+          },
+          {
+            ...payload,
+            source: 'MeteoSvizzera',
+            date: '2026-06-02'
+          }
+        ]
+      },
+      {
+        sourceName: 'ZAMG',
+        geographicMatchScore: 0.85,
+        domainSpecialtyScore: 0.8,
+        payloads: [
+          {
+            ...payload,
+            source: 'ZAMG',
+            date: '2026-06-01'
+          }
+        ]
+      }
+    ]);
+    mockOpenMeteo.mockReset();
+    mockAgent.mockReset();
+
+    const { db, sqlite } = setupRefreshDb('scout');
+
+    await refreshOutingForecasts(1, { db, force: true });
+
+    expect(mockScout).toHaveBeenCalledTimes(1);
+    expect(mockOpenMeteo).not.toHaveBeenCalled();
+    expect(mockAgent).not.toHaveBeenCalled();
+
+    // Verify sources were upserted
+    const meteoSvizzeraSource = db
+      .select()
+      .from(sources)
+      .where(eq(sources.name, 'MeteoSvizzera'))
+      .get();
+    const zamgSource = db
+      .select()
+      .from(sources)
+      .where(eq(sources.name, 'ZAMG'))
+      .get();
+
+    expect(meteoSvizzeraSource).toBeDefined();
+    expect(meteoSvizzeraSource?.geographicMatchScore).toBe(0.95);
+    expect(meteoSvizzeraSource?.domainSpecialtyScore).toBe(0.9);
+    expect(zamgSource).toBeDefined();
+    expect(zamgSource?.geographicMatchScore).toBe(0.85);
+    expect(zamgSource?.domainSpecialtyScore).toBe(0.8);
+
+    // Verify cache entries were written
+    const cache = new ForecastCache(db);
+    const now = new Date();
+    const meteoEntry1 = cache.get(
+      {
+        sourceId: meteoSvizzeraSource!.id,
+        keyPointId: 1,
+        forecastDate: '2026-06-01'
+      },
+      now
+    );
+    const meteoEntry2 = cache.get(
+      {
+        sourceId: meteoSvizzeraSource!.id,
+        keyPointId: 1,
+        forecastDate: '2026-06-02'
+      },
+      now
+    );
+    const zamgEntry = cache.get(
+      {
+        sourceId: zamgSource!.id,
+        keyPointId: 1,
+        forecastDate: '2026-06-01'
+      },
+      now
+    );
+
+    expect(meteoEntry1).toBeDefined();
+    expect(meteoEntry1?.payload.source).toBe('MeteoSvizzera');
+    expect(meteoEntry2).toBeDefined();
+    expect(meteoEntry2?.payload.source).toBe('MeteoSvizzera');
+    expect(zamgEntry).toBeDefined();
+    expect(zamgEntry?.payload.source).toBe('ZAMG');
+
     sqlite.close();
   });
 });

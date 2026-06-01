@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { isForecastFresh } from '$lib/forecast/types';
 import {
   activityLabel,
@@ -28,6 +28,7 @@ export interface CreateOutingInput {
   activity: string;
   startDate: string;
   endDate: string;
+  scoutingNotes?: string;
 }
 
 export interface DashboardOuting {
@@ -42,6 +43,7 @@ export interface DashboardOuting {
   needsRefresh: boolean;
   verdictChanged: boolean;
   previousVerdict: Verdict | null;
+  scoutingNotes: string | null;
 }
 
 type ForecastRow = {
@@ -135,6 +137,12 @@ export function createOuting(
       })
       .run();
 
+    if (input.scoutingNotes) {
+      tx.run(
+        sql`UPDATE outings SET scouting_notes = ${input.scoutingNotes} WHERE area_id = ${area.id} ORDER BY id DESC LIMIT 1`
+      );
+    }
+
     tx.insert(forecasts)
       .values(
         dailyForecasts.map(({ date, metrics }) => ({
@@ -172,27 +180,23 @@ type OutingDashboardRow = {
   startDate: string;
   endDate: string;
   lastUpdatedAt: Date;
+  scoutingNotes: string | null;
 };
 
 export function listDashboardOutings(
   database: AppDatabase = getDatabase(),
   visitedAt = new Date()
 ): DashboardOuting[] {
-  const outingRows = database
-    .select({
-      id: outings.id,
-      areaId: outings.areaId,
-      areaName: areas.name,
-      activity: outings.activity,
-      startDate: outings.startDate,
-      endDate: outings.endDate,
-      lastUpdatedAt: outings.lastUpdatedAt
-    })
-    .from(outings)
-    .innerJoin(areas, eq(outings.areaId, areas.id))
-    .where(eq(outings.active, true))
-    .orderBy(desc(outings.createdAt), desc(outings.id))
-    .all();
+  const outingRows = database.all(
+    sql`SELECT
+      o.id, o.area_id as areaId, a.name as areaName, o.activity,
+      o.start_date as startDate, o.end_date as endDate,
+      o.last_updated_at as lastUpdatedAt, o.scouting_notes as scoutingNotes
+    FROM outings o
+    INNER JOIN areas a ON o.area_id = a.id
+    WHERE o.active = 1
+    ORDER BY o.created_at DESC, o.id DESC`
+  ) as unknown as OutingDashboardRow[];
 
   const source = ensureDemoSource(database);
   const snapshotsByOuting = new Map(
@@ -212,7 +216,8 @@ export function listDashboardOutings(
     return {
       ...card,
       previousVerdict: verdictChanged ? previousVerdict : null,
-      verdictChanged
+      verdictChanged,
+      scoutingNotes: outing.scoutingNotes
     };
   });
 
@@ -233,20 +238,15 @@ export function markOutingVerdictSeen(
   database: AppDatabase = getDatabase(),
   seenAt = new Date()
 ): boolean {
-  const outing = database
-    .select({
-      id: outings.id,
-      areaId: outings.areaId,
-      areaName: areas.name,
-      activity: outings.activity,
-      startDate: outings.startDate,
-      endDate: outings.endDate,
-      lastUpdatedAt: outings.lastUpdatedAt
-    })
-    .from(outings)
-    .innerJoin(areas, eq(outings.areaId, areas.id))
-    .where(and(eq(outings.id, outingId), eq(outings.active, true)))
-    .get();
+  const outing = database.get(
+    sql`SELECT
+      o.id, o.area_id as areaId, a.name as areaName, o.activity,
+      o.start_date as startDate, o.end_date as endDate,
+      o.last_updated_at as lastUpdatedAt, o.scouting_notes as scoutingNotes
+    FROM outings o
+    INNER JOIN areas a ON o.area_id = a.id
+    WHERE o.id = ${outingId} AND o.active = 1`
+  ) as unknown as OutingDashboardRow | undefined;
 
   if (!outing) {
     return false;
@@ -262,7 +262,10 @@ function buildDashboardOuting(
   outing: OutingDashboardRow,
   sourceId: number,
   database: AppDatabase
-): Omit<DashboardOuting, 'previousVerdict' | 'verdictChanged'> {
+): Omit<
+  DashboardOuting,
+  'previousVerdict' | 'verdictChanged' | 'scoutingNotes'
+> {
   if (!isActivity(outing.activity)) {
     throw new Error(`Unsupported activity stored for outing ${outing.id}.`);
   }
