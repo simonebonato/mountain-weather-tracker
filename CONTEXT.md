@@ -65,3 +65,11 @@ Sources that lack a structured API carry **fetch instructions** — free-text gu
 ## Discovery
 
 The user-triggered process of finding new Sources through web exploration. Initiated from the settings UI when coverage for a region feels lacking. The agent explores the web, proposes new Source records with initial geographic match and domain specialty scores, and persists them for user review. Discovered Sources participate in forecast aggregation immediately; the user can adjust scores or set a reliability score afterward.
+
+## Scout
+
+An autonomous find-and-fetch agent adapter (`adapter = 'scout'`). Unlike the scripted agent adapter (which follows explicit `fetch_instructions` for a known Source), the Scout is given a location, an activity, optional Scouting Notes, and a set of dates, and autonomously decides which weather websites to consult. It upserts one `Source` row per discovered site and populates their forecast cache entries directly. A permanent meta-`Source` row (`name = 'Scout'`, `adapter = 'scout'`) acts as the trigger in the refresh pipeline. The Scout re-runs only when the user explicitly presses "Re-scout" on the outing card.
+
+## Scouting Notes
+
+Optional free-text on an Outing that the user can supply to bias the Scout's source selection. Examples: "focus on summit wind and avalanche bulletin", "family trip — prioritise rain and temperature". Stored as `scouting_notes` on the `outings` table. Passed verbatim into the Scout's prompt alongside the activity.
