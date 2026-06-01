@@ -42,6 +42,7 @@ export interface DashboardOuting {
   needsRefresh: boolean;
   verdictChanged: boolean;
   previousVerdict: Verdict | null;
+  sourcesForecasts: SourceForecast[];
 }
 
 type ForecastRow = {
@@ -55,6 +56,17 @@ type ForecastRow = {
   snowDepthCm: number;
   freezeLevelM: number;
   avalancheRisk: number;
+};
+
+export type SourceForecast = {
+  sourceName: string;
+  sourceId: number;
+  forecasts: Array<{
+    forecastDate: string;
+    temperatureC: number;
+    precipitationMm: number;
+    windKmh: number;
+  }>;
 };
 
 export function createOuting(
@@ -311,6 +323,53 @@ function buildDashboardOuting(
           )
         }));
 
+  // Fetch all forecasts from all sources for the sources breakdown
+  const allSourceForecasts = database
+    .select({
+      sourceId: forecasts.sourceId,
+      sourceName: sources.name,
+      forecastDate: forecasts.forecastDate,
+      temperatureC: forecasts.temperatureC,
+      precipitationMm: forecasts.precipitationMm,
+      windKmh: forecasts.windKmh
+    })
+    .from(forecasts)
+    .innerJoin(sources, eq(forecasts.sourceId, sources.id))
+    .innerJoin(keyPoints, eq(forecasts.keyPointId, keyPoints.id))
+    .where(eq(keyPoints.areaId, outing.areaId))
+    .all()
+    .filter(
+      (forecast) =>
+        forecast.forecastDate >= outing.startDate &&
+        forecast.forecastDate <= outing.endDate
+    );
+
+  // Group by source
+  const sourcesMap = new Map<number, SourceForecast>();
+  for (const forecast of allSourceForecasts) {
+    if (!sourcesMap.has(forecast.sourceId)) {
+      sourcesMap.set(forecast.sourceId, {
+        sourceName: forecast.sourceName,
+        sourceId: forecast.sourceId,
+        forecasts: []
+      });
+    }
+    const source = sourcesMap.get(forecast.sourceId)!;
+    source.forecasts.push({
+      forecastDate: forecast.forecastDate,
+      temperatureC: forecast.temperatureC,
+      precipitationMm: forecast.precipitationMm,
+      windKmh: forecast.windKmh
+    });
+  }
+
+  // Sort forecasts within each source by date
+  for (const source of sourcesMap.values()) {
+    source.forecasts.sort((a, b) =>
+      a.forecastDate.localeCompare(b.forecastDate)
+    );
+  }
+
   return {
     id: outing.id,
     areaName: outing.areaName,
@@ -326,7 +385,8 @@ function buildDashboardOuting(
       forecastRows.length < expectedDates.length ||
       forecastRows.some(
         (forecast) => !isForecastFresh(new Date(forecast.fetchedAt))
-      )
+      ),
+    sourcesForecasts: Array.from(sourcesMap.values())
   };
 }
 

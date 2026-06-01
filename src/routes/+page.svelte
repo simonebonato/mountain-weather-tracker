@@ -13,6 +13,7 @@
   let outings = data.outings;
   let clearedVerdictChanges: Record<number, boolean> = {};
   let refreshingOutingIds: number[] = [];
+  let expandedSources: Record<number, boolean> = {};
 
   type FailedForm = {
     intent?: 'createFromUrl' | 'createOuting';
@@ -313,6 +314,54 @@
                 </dl>
               </div>
             {/each}
+          </div>
+
+          <div class="sources-section">
+            <button
+              type="button"
+              class="sources-toggle"
+              onclick={() =>
+                (expandedSources[outing.id] = !expandedSources[outing.id])}
+              aria-expanded={expandedSources[outing.id] || false}
+            >
+              <span class="toggle-indicator">
+                {expandedSources[outing.id] ? '▼' : '▶'}
+              </span>
+              Sources ({outing.sourcesForecasts.length})
+            </button>
+
+            {#if expandedSources[outing.id]}
+              <div class="sources-breakdown">
+                {#each outing.sourcesForecasts as sourceForecasts}
+                  <div class="source-item">
+                    <h4>{sourceForecasts.sourceName}</h4>
+                    <div class="source-forecasts">
+                      <table class="source-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Temp (°C)</th>
+                            <th>Precip (mm)</th>
+                            <th>Wind (km/h)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {#each sourceForecasts.forecasts as forecast}
+                            <tr>
+                              <td>{formatDisplayDate(forecast.forecastDate)}</td
+                              >
+                              <td>{forecast.temperatureC}</td>
+                              <td>{forecast.precipitationMm}</td>
+                              <td>{forecast.windKmh}</td>
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
         </details>
       </article>
@@ -674,6 +723,98 @@
     display: flex;
     align-items: center;
     gap: 10px;
+  }
+
+  .sources-section {
+    border-top: 1px solid #e4e8df;
+    padding: 12px 16px 0;
+  }
+
+  .sources-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: auto;
+    padding: 8px 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    color: #4e5b4d;
+    font: inherit;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .sources-toggle:hover {
+    background: none;
+    color: #245a46;
+  }
+
+  .toggle-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    font-size: 0.8rem;
+  }
+
+  .sources-breakdown {
+    display: grid;
+    gap: 16px;
+    padding: 14px 0 16px;
+  }
+
+  .source-item {
+    display: grid;
+    gap: 8px;
+  }
+
+  .source-item h4 {
+    margin: 0;
+    font-size: 0.92rem;
+    color: #4e5b4d;
+    font-weight: 700;
+  }
+
+  .source-forecasts {
+    background: #fafbf8;
+    border-radius: 4px;
+    overflow: auto;
+  }
+
+  .source-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  .source-table thead {
+    background: #f0f2ec;
+    border-bottom: 1px solid #d8ddd2;
+  }
+
+  .source-table th,
+  .source-table td {
+    padding: 8px 12px;
+    text-align: left;
+  }
+
+  .source-table th {
+    color: #667365;
+    font-size: 0.75rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .source-table td {
+    color: #17201b;
+    border-bottom: 1px solid #edf0e9;
+  }
+
+  .source-table tbody tr:last-child td {
+    border-bottom: 0;
   }
 
   time {
