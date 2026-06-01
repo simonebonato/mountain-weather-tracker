@@ -28,6 +28,7 @@ export interface CreateOutingInput {
   activity: string;
   startDate: string;
   endDate: string;
+  scoutingNotes?: string;
 }
 
 export interface DashboardOuting {

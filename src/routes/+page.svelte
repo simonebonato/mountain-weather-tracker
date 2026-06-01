@@ -21,6 +21,7 @@
     activity?: string;
     startDate?: string;
     endDate?: string;
+    scoutingNotes?: string;
     error?: string;
   };
 
@@ -83,6 +84,29 @@
 
     try {
       const response = await fetch(`/api/outings/${outing.id}/refresh`, {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const body = (await response.json()) as {
+        outing: PageData['outings'][number];
+      };
+      replaceOuting(body.outing);
+    } finally {
+      refreshingOutingIds = refreshingOutingIds.filter(
+        (id) => id !== outing.id
+      );
+    }
+  }
+
+  async function scoutOuting(outing: PageData['outings'][number]) {
+    refreshingOutingIds = [...new Set([...refreshingOutingIds, outing.id])];
+
+    try {
+      const response = await fetch(`/api/outings/${outing.id}/scout`, {
         method: 'POST'
       });
 
@@ -223,6 +247,12 @@
         />
       </label>
 
+      <label>
+        <span>Extra context for weather search</span>
+        <textarea name="scoutingNotes" value={fieldValue('scoutingNotes')}
+        ></textarea>
+      </label>
+
       <button type="submit">Add outing</button>
     </form>
 
@@ -291,6 +321,18 @@
                 }}
               >
                 Refresh
+              </button>
+              <button
+                type="button"
+                class="refresh-button"
+                disabled={isRefreshing(outing)}
+                onclick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void scoutOuting(outing);
+                }}
+              >
+                Re-scout
               </button>
             </div>
           </summary>
@@ -449,7 +491,8 @@
   }
 
   input,
-  select {
+  select,
+  textarea {
     min-width: 0;
     width: 100%;
     min-height: 42px;
@@ -459,6 +502,13 @@
     background: #ffffff;
     font: inherit;
     color: #17201b;
+  }
+
+  textarea {
+    min-height: 80px;
+    padding: 8px 12px;
+    resize: vertical;
+    font-family: inherit;
   }
 
   .input-row input {
@@ -518,6 +568,11 @@
       auto;
     gap: 10px;
     align-items: end;
+  }
+
+  .outing-form label:nth-child(5) {
+    grid-column: 1 / -1;
+    align-items: start;
   }
 
   .outing-list {
