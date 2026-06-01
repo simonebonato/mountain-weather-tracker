@@ -1,9 +1,10 @@
-import { and, eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { getDatabase, type AppDatabase } from '$lib/server/db/index';
 import { keyPoints, outings, sources } from '$lib/server/db/schema';
 import { datesFrom } from '$lib/server/weather/dates';
 import { fetchOpenMeteoForecasts } from '$lib/server/weather/open-meteo';
+import { fetchAgentForecasts } from '$lib/server/weather/agent';
 
 import { ForecastCache } from './cache';
 import { listActiveOutings } from './dashboard';
@@ -75,7 +76,7 @@ export async function refreshOutingForecasts(
 
   await Promise.all(
     forecastSources.map(async (source) => {
-      if (source.adapter !== 'open-meteo') {
+      if (source.adapter !== 'open-meteo' && source.adapter !== 'agent') {
         return;
       }
 
@@ -101,10 +102,34 @@ export async function refreshOutingForecasts(
           continue;
         }
 
-        const fetchedForecasts = await fetchOpenMeteoForecasts(
-          keyPoint,
-          datesToFetch
-        );
+        let fetchedForecasts;
+        if (source.adapter === 'open-meteo') {
+          fetchedForecasts = await fetchOpenMeteoForecasts(
+            keyPoint,
+            datesToFetch
+          );
+        } else {
+          // agent adapter
+          const row = db.get<{ fetch_instructions: string | null }>(
+            sql`SELECT fetch_instructions FROM sources WHERE id = ${source.id}`
+          );
+          const fetchInstructions = row?.fetch_instructions ?? null;
+          if (!fetchInstructions) {
+            continue;
+          }
+          try {
+            fetchedForecasts = await fetchAgentForecasts(
+              source.name,
+              fetchInstructions,
+              keyPoint,
+              datesToFetch
+            );
+          } catch {
+            console.error(`Agent fetch failed for source ${source.name}`);
+            continue;
+          }
+        }
+
         const fetchedAt = new Date();
 
         for (const payload of fetchedForecasts) {

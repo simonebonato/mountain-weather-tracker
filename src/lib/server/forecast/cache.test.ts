@@ -1,10 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ForecastPayload } from '$lib/forecast/types';
 import { createDatabase } from '$lib/server/db/index';
-import { areas, keyPoints, sources } from '$lib/server/db/schema';
+import { areas, keyPoints, outings, sources } from '$lib/server/db/schema';
 
 import { ForecastCache } from './cache';
+import { refreshOutingForecasts } from './refresh';
+
+vi.mock('$lib/server/weather/open-meteo', () => ({
+  fetchOpenMeteoForecasts: vi.fn()
+}));
+
+vi.mock('$lib/server/weather/agent', () => ({
+  fetchAgentForecasts: vi.fn(),
+  detectAgentCredentials: vi
+    .fn()
+    .mockReturnValue({ codex: true, claude: false })
+}));
+
+import { fetchOpenMeteoForecasts } from '$lib/server/weather/open-meteo';
+import { fetchAgentForecasts } from '$lib/server/weather/agent';
+
+const mockOpenMeteo = vi.mocked(fetchOpenMeteoForecasts);
+const mockAgent = vi.mocked(fetchAgentForecasts);
 
 const payload: ForecastPayload = {
   source: 'Open-Meteo',
@@ -93,6 +111,77 @@ describe('ForecastCache', () => {
   });
 });
 
+describe('refresh adapter routing', () => {
+  it('calls fetchOpenMeteoForecasts for open-meteo adapter', async () => {
+    mockOpenMeteo.mockResolvedValue([{ ...payload, date: '2026-06-01' }]);
+    mockAgent.mockReset();
+
+    const { db, sqlite } = setupRefreshDb('open-meteo');
+
+    await refreshOutingForecasts(1, { db, force: true });
+
+    expect(mockOpenMeteo).toHaveBeenCalledTimes(1);
+    expect(mockAgent).not.toHaveBeenCalled();
+    sqlite.close();
+  });
+
+  it('calls fetchAgentForecasts for agent adapter', async () => {
+    mockAgent.mockResolvedValue([
+      { ...payload, source: 'TestAgent', date: '2026-06-01' }
+    ]);
+    mockOpenMeteo.mockReset();
+
+    const { db, sqlite } = setupRefreshDb(
+      'agent',
+      'https://example.com/weather'
+    );
+
+    await refreshOutingForecasts(1, { db, force: true });
+
+    expect(mockAgent).toHaveBeenCalledTimes(1);
+    expect(mockOpenMeteo).not.toHaveBeenCalled();
+    sqlite.close();
+  });
+
+  it('skips agent source when fetch_instructions is null', async () => {
+    mockAgent.mockReset();
+    mockOpenMeteo.mockReset();
+
+    const { db, sqlite } = setupRefreshDb('agent', null);
+
+    await refreshOutingForecasts(1, { db, force: true });
+
+    expect(mockAgent).not.toHaveBeenCalled();
+    sqlite.close();
+  });
+
+  it('skips unknown adapter without error', async () => {
+    mockOpenMeteo.mockReset();
+    mockAgent.mockReset();
+
+    const { db, sqlite } = setupRefreshDb('unknown-adapter');
+
+    await expect(
+      refreshOutingForecasts(1, { db, force: true })
+    ).resolves.not.toThrow();
+
+    expect(mockOpenMeteo).not.toHaveBeenCalled();
+    expect(mockAgent).not.toHaveBeenCalled();
+    sqlite.close();
+  });
+
+  it('does not crash the pipeline when agent fetch throws', async () => {
+    mockAgent.mockRejectedValue(new Error('agent failed'));
+
+    const { db, sqlite } = setupRefreshDb('agent', 'https://example.com');
+
+    await expect(
+      refreshOutingForecasts(1, { db, force: true })
+    ).resolves.not.toThrow();
+    sqlite.close();
+  });
+});
+
 function setupCache() {
   const { db, sqlite } = createDatabase();
 
@@ -121,4 +210,48 @@ function setupCache() {
     cache: new ForecastCache(db),
     sqlite
   };
+}
+
+function setupRefreshDb(
+  adapter: string,
+  fetchInstructions: string | null = null
+) {
+  const { db, sqlite } = createDatabase();
+
+  db.insert(areas).values({ id: 1, name: 'Alps' }).run();
+  db.insert(keyPoints)
+    .values({
+      id: 1,
+      areaId: 1,
+      name: 'Summit',
+      latitude: 46.86,
+      longitude: 9.53,
+      elevationM: 2500
+    })
+    .run();
+  db.insert(outings)
+    .values({
+      id: 1,
+      areaId: 1,
+      name: 'Test Outing',
+      startDate: '2026-06-01',
+      endDate: '2026-06-03'
+    })
+    .run();
+  db.insert(sources)
+    .values({
+      id: 1,
+      name: 'Test Source',
+      adapter,
+      geographicMatchScore: 1,
+      domainSpecialtyScore: 1
+    })
+    .run();
+  if (fetchInstructions !== null) {
+    sqlite.exec(
+      `UPDATE sources SET fetch_instructions = '${fetchInstructions.replace("'", "''")}' WHERE id = 1`
+    );
+  }
+
+  return { db, sqlite };
 }

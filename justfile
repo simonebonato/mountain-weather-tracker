@@ -1,3 +1,9 @@
+dev:
+    npm run dev
+
+reset-db:
+    rm -f data/mountain-weather-tracker.sqlite
+
 install:
     npm install --ignore-scripts
     npm rebuild
