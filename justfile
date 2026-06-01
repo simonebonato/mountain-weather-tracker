@@ -17,3 +17,6 @@ check:
 reset-for-agents:
     rm -r .worktrees
     git worktree prune
+
+run-parallel:
+    ./scripts/run-parallel.sh
