@@ -184,7 +184,6 @@ describe('refresh adapter routing', () => {
 
 function setupCache() {
   const { db, sqlite } = createDatabase();
-  sqlite.exec('ALTER TABLE sources ADD COLUMN fetch_instructions TEXT');
 
   db.insert(sources)
     .values({
@@ -218,7 +217,6 @@ function setupRefreshDb(
   fetchInstructions: string | null = null
 ) {
   const { db, sqlite } = createDatabase();
-  sqlite.exec('ALTER TABLE sources ADD COLUMN fetch_instructions TEXT');
 
   db.insert(areas).values({ id: 1, name: 'Alps' }).run();
   db.insert(keyPoints)

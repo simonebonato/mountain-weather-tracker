@@ -109,7 +109,7 @@ export async function refreshOutingForecasts(
             datesToFetch
           );
         } else {
-          // agent adapter — fetch_instructions lives in the DB but not in schema.ts
+          // agent adapter
           const row = db.get<{ fetch_instructions: string | null }>(
             sql`SELECT fetch_instructions FROM sources WHERE id = ${source.id}`
           );

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS sources (
   geographic_match_score REAL NOT NULL DEFAULT 1,
   domain_specialty_score REAL NOT NULL DEFAULT 1,
   reliability_score REAL,
+  fetch_instructions TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
