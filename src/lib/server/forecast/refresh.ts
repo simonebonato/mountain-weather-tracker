@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import { getDatabase, type AppDatabase } from '$lib/server/db/index';
 import { keyPoints, outings, sources } from '$lib/server/db/schema';
@@ -113,7 +113,12 @@ export async function refreshOutingForecasts(
           const discoveredSource = db
             .select()
             .from(sources)
-            .where(eq(sources.name, result.sourceName))
+            .where(
+              and(
+                eq(sources.name, result.sourceName),
+                eq(sources.adapter, 'scout')
+              )
+            )
             .get();
 
           if (!discoveredSource) {
