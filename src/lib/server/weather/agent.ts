@@ -148,7 +148,7 @@ export function defaultSubprocessRunner(
   });
 }
 
-function chooseAgentCommand(): [string, string[]] {
+export function chooseAgentCommand(): [string, string[]] {
   const creds = detectAgentCredentials();
   if (creds.codex) {
     return ['codex', ['exec']];

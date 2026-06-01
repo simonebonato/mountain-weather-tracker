@@ -23,10 +23,19 @@ function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function clampToOpenMeteoHorizon(dates: string[], now = new Date()): string[] {
-  const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+export function clampToOpenMeteoHorizon(
+  dates: string[],
+  now = new Date()
+): string[] {
+  const todayMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate()
+  );
   const today = toIsoDate(new Date(todayMs));
-  const maxDate = toIsoDate(new Date(todayMs + (OPEN_METEO_HORIZON_DAYS - 1) * DAY_MS));
+  const maxDate = toIsoDate(
+    new Date(todayMs + (OPEN_METEO_HORIZON_DAYS - 1) * DAY_MS)
+  );
   return dates.filter((d) => d >= today && d <= maxDate);
 }
 

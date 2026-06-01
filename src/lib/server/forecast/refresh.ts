@@ -5,6 +5,7 @@ import { keyPoints, outings, sources } from '$lib/server/db/schema';
 import { datesFrom } from '$lib/server/weather/dates';
 import { fetchOpenMeteoForecasts } from '$lib/server/weather/open-meteo';
 import { fetchAgentForecasts } from '$lib/server/weather/agent';
+import { fetchScoutForecasts } from '$lib/server/weather/scout';
 
 import { ForecastCache } from './cache';
 import { listActiveOutings } from './dashboard';
@@ -66,6 +67,11 @@ export async function refreshOutingForecasts(
     throw new Error(`Outing ${outingId} does not exist`);
   }
 
+  const outingRow = db.get<{ scouting_notes: string | null }>(
+    sql`SELECT scouting_notes FROM outings WHERE id = ${outingId}`
+  );
+  const scoutingNotes = outingRow?.scouting_notes ?? '';
+
   const outingKeyPoints = db
     .select()
     .from(keyPoints)
@@ -76,6 +82,59 @@ export async function refreshOutingForecasts(
 
   await Promise.all(
     forecastSources.map(async (source) => {
+      if (source.adapter === 'scout') {
+        // Scout discovers sources and populates their cache entries directly
+        const primaryKeyPoint = outingKeyPoints[0];
+        if (!primaryKeyPoint) {
+          return;
+        }
+
+        const scoutResults = await fetchScoutForecasts(
+          {
+            latitude: primaryKeyPoint.latitude,
+            longitude: primaryKeyPoint.longitude,
+            elevationM: primaryKeyPoint.elevationM ?? undefined
+          },
+          outing.activity,
+          scoutingNotes,
+          dates
+        );
+
+        const fetchedAt = new Date();
+
+        for (const result of scoutResults) {
+          // Upsert the discovered source using INSERT OR IGNORE
+          db.run(
+            sql`INSERT OR IGNORE INTO sources (name, adapter, geographic_match_score, domain_specialty_score)
+              VALUES (${result.sourceName}, 'scout', ${result.geographicMatchScore}, ${result.domainSpecialtyScore})`
+          );
+
+          // Get the source ID (either newly created or existing)
+          const discoveredSource = db
+            .select()
+            .from(sources)
+            .where(eq(sources.name, result.sourceName))
+            .get();
+
+          if (!discoveredSource) {
+            console.error(`Failed to get source for ${result.sourceName}`);
+            continue;
+          }
+
+          // Write forecast cache entries for each discovered source
+          for (const payload of result.payloads) {
+            cache.set({
+              sourceId: discoveredSource.id,
+              keyPointId: primaryKeyPoint.id,
+              forecastDate: payload.date,
+              fetchedAt,
+              payload
+            });
+          }
+        }
+        return;
+      }
+
       if (source.adapter !== 'open-meteo' && source.adapter !== 'agent') {
         return;
       }
