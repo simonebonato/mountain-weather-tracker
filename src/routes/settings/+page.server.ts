@@ -94,5 +94,28 @@ export const actions: Actions = {
       .run();
 
     return { updated: true };
+  },
+
+  setFetchInstructions: async ({ request }) => {
+    const formData = await request.formData();
+    const id = Number(formData.get('id'));
+    const instructions = formData.get('fetchInstructions');
+
+    if (!Number.isInteger(id) || id <= 0) {
+      return fail(400, { error: 'Invalid source id.' });
+    }
+
+    const db = getDatabase();
+    db.update(sources)
+      .set({
+        fetchInstructions:
+          instructions === '' || instructions === null
+            ? null
+            : String(instructions)
+      })
+      .where(eq(sources.id, id))
+      .run();
+
+    return { updated: true };
   }
 };
